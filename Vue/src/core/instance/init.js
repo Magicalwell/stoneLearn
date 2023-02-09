@@ -4,6 +4,8 @@ let uid = 0
 export function initMixin(Vue) {
     Vue.prototype._init = function (options) {
         const vm = this
+        // 这一步标记自身是vue实例，避免后续监听整个vue实例
+        vm._isVue = true
         vm._uid = uid++
         if (options && options._isComponent) {
 
