@@ -25,4 +25,25 @@ export function set(target, key, val) {
     }
     defineReactive()
 }
+export function del(target, key) {
+    // 先判断目标是不是数组，key是不是数字
+    if (isArray(target) && typeof key === 'number') {
+        target.splice(key, 1) // 调用被重写的数组方法
+        return
+    }
+    const ob = target.__ob__
+    if (target._isVue || (ob && ob.vmCount)) {
+        return
+    }
+    // 没有key这个对象
+    if (!hasOwn(target, key)) {
+        return
+    }
+    delete target[key]
+    if (!ob) {
+        // 对象没有观察者，不是响应式，则直接返回啥也不做
+        return
+    }
+    ob.dep.notify()
+}
 export function defineReactive() { }
