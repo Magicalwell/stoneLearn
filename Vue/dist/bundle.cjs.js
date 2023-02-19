@@ -13,6 +13,12 @@
         var n = parseFloat(String(val));
         return n >= 0 && Math.floor(n) === n && isFinite(val)
     }
+    function extend(to, _from) {
+        for (var key in _from) {
+            to[key] = _from[key];
+        }
+        return to
+    }
 
     var config = ({
         /**
@@ -262,6 +268,21 @@
         ob.dep.notify();
     }
 
+    var patternTypes = [String, RegExp, Array];
+    var KeepAlive = {
+      name: 'keep-alive',
+      abstract: true,
+      props: {
+        include: patternTypes,
+        exclude: patternTypes,
+        max: [String, Number]
+      }
+    };
+
+    var builtInComponents = {
+      KeepAlive: KeepAlive
+    };
+
     function initGlobalAPI(Vue) {
         Vue.set = set;
         Vue.delete = del; // 后面会取别名为vm.$delete
@@ -271,7 +292,9 @@
         ASSET_TYPES.forEach(function (type) {
             Vue.options[type + 's'] = Object.create(null);
         });
-
+        // 下面引入keepalive组件，extend方法并不是表面意义上的继承，而是复制对象，builtInComponents就是keepalive组件，extend把每一个key都复制给了options.components，key就是name,props,methods等一些vue实例中的属性,但他们整体都是作为一个叫keepalive对象加入到components中
+        extend(Vue.options.components, builtInComponents);
+        console.log(Vue.options.components, builtInComponents, '>>>>>>>>>>');
         // initUse(Vue) 初始化devtools
         initMixin(Vue); // 初始化mixin方法
         initAssetRegisters();

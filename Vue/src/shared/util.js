@@ -7,3 +7,9 @@ export function isValidArrayIndex(val) {
     const n = parseFloat(String(val))
     return n >= 0 && Math.floor(n) === n && isFinite(val)
 }
+export function extend(to, _from) {
+    for (const key in _from) {
+        to[key] = _from[key]
+    }
+    return to
+}
