@@ -13,3 +13,6 @@ export function extend(to, _from) {
     }
     return to
 }
+export function isDef(v) {
+    return v !== undefined && v !== null
+}
