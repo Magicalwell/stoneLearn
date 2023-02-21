@@ -6,5 +6,6 @@ export function initMixin(Vue) {
     Vue.mixin = function (mixin) {
         /*mergeOptions合并optiuons*/
         this.options = mergeOptions(this.options, mixin)
+        return this
     }
 }
