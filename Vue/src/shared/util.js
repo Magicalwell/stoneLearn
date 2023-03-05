@@ -1,5 +1,7 @@
 const hasOwnProperty = Object.prototype.hasOwnProperty
 export const isArray = Array.isArray
+const _toString = Object.prototype.toString
+const camelizeRE = /-(\w)/g
 export function hasOwn(obj, key) {
     return hasOwnProperty.call(obj, key)
 }
@@ -28,4 +30,20 @@ export function toArray(list, start) {
         ret[i] = list[i + start]
     }
     return ret
+}
+// 缓存方法，调用cached实际上调用的是return的一个自执行函数，里面能访问到cache
+export function cached(fn) {
+    const cache = Object.create(null)
+    return (function cachedFn(str) {
+        const hit = cache[str]
+        return hit || (cache[str] = fn(str))
+    })
+}
+
+export const camelize = cached((str) => {
+    return str.replace(camelizeRE, (_, c) => c ? c.toUpperCase() : '')
+})
+// 借用对象上的tostring方法
+export function isPlainObject(obj) {
+    return _toString.call(obj) === '[object Object]'
 }
