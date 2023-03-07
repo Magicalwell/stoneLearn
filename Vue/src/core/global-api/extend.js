@@ -20,7 +20,8 @@ export function initExtend(Vue) {
     Sub.prototype.constructor = Sub
     // 继承父类的方法和属性
     Sub.cid = cid++
-    Sub.options = mergeOptions(Super.options, extendOptions)
+    Sub.options = mergeOptions(Super.options, extendOptions) // 正常new的时候合并的是传入的options和初始化的options，这里
+    // 是父类的options和extend时传入的options
     Sub['super'] = Super
     // 到这里Sub的options已经合并了options，下面可以直接使用
     if (Sub.options.props) {

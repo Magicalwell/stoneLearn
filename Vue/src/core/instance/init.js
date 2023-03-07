@@ -1,4 +1,4 @@
-import { mergeOptions } from '../util/index'
+import { mergeOptions,extend } from '../util/index'
 import { initLifecycle, callHook } from './lifecycle'
 let uid = 0
 export function initMixin(Vue) {
@@ -23,6 +23,7 @@ export function initMixin(Vue) {
         initLifecycle(vm)
     }
 }
+// resolveConstructorOptions用来返回类构造函数上面的最新的options
 export function resolveConstructorOptions(Ctor) {
     // 这个函数的作用就是处理两种情况产生的vue实例，一种是new Vue出来的，一种是extend出来的
     // 在上面merge的时候传入的参数是vm.constructor，constructor指向的是当前对象的构造函数 vm._proto_指向的是当前对象的原型，
@@ -36,7 +37,20 @@ export function resolveConstructorOptions(Ctor) {
     //     ...
     //   }
     if (Ctor.super) {
-
+        const superOptions = resolveConstructorOptions(Ctor.super) // 父类可能也有父类，进行递归获得父类的options
+        const cacheSuperOptions = Ctor.superOptions 
+        if (superOptions !== cacheSuperOptions) {
+            // 在extend后父类的options发生了变化，把新的options更新到子类Sub上面去
+            Ctor.superOptions = superOptions
+            const modifiedOptions = resolveConstructorOptions(Ctor)
+            if (modifiedOptions) {
+                extend(Ctor.extendOptions,modifiedOptions)
+            }
+            options = Ctor.options = mergeOptions(superOptions,Ctor.extendOptions)
+            if (options.name) {
+                options.components[options.name] = Ctor
+              }
+        }
     }
     return options
 }
