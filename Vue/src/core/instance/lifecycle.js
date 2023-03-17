@@ -25,3 +25,11 @@ export function initLifecycle(vm) {
 export function callHook(vm) {
 
 }
+export function lifecycleMixin(Vue) {
+  // 这个方法就干了一件事，给原型上拓展更新dom的方法，也就是diff的入口
+  Vue.prototype._update = function (vnode, hydrating) {
+    const vm = this
+    const prevEl = vm.$el
+    const prevVnode = vm._vnode
+  }
+}
