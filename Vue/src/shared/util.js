@@ -5,6 +5,9 @@ const camelizeRE = /-(\w)/g
 export function hasOwn(obj, key) {
     return hasOwnProperty.call(obj, key)
 }
+export function isUndef(v) {
+    return v === undefined || v === null
+}
 // 判断传过来的数组下标是不是正确合理的值
 export function isValidArrayIndex(val) {
     const n = parseFloat(String(val))
