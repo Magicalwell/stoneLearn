@@ -1,6 +1,7 @@
 import { mergeOptions, extend } from '../util/index'
 import { initLifecycle, callHook } from './lifecycle'
 import { initEvents } from './events'
+import { initRender } from './render'
 let uid = 0
 export function initMixin(Vue) {
     Vue.prototype._init = function (options) {
@@ -19,6 +20,7 @@ export function initMixin(Vue) {
         vm._self = vm
         initLifecycle(vm)
         initEvents(vm) // 初始化事件系统 v-on 这里就指的是在父组件中引入了子组件 在其上面可以v-on或者@click等方式监听到事件，而子组件在编译的时候解析到标签时，会获取父组件在自己上面注册的事件并保留在vm.$options._parentListeners​​中
+        initRender(vm) // 进行插槽的处理，创建组件两种方法的挂载
     }
 }
 // resolveConstructorOptions用来返回类构造函数上面的最新的options
