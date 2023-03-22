@@ -57,4 +57,11 @@ export function initRender(vm) {
     // $createElement表示的是用户自己编写的render函数，需要在内部重新标准化处理以下，但其实这俩内部都调用的是_createElement
     vm._c = (a, b, c, d) => createElement(vm, a, b, c, d, false)
     vm.$createElement = (a, b, c, d) => createElement(vm, a, b, c, d, true)
+
+    //处理attrs 和 listeners，分别拿到vnode中的data和_parentListeners，这个_parentListeners在编译到子组件的时候，会获取父组件在自身上绑定的事件
+    // 并保存在_parentListeners中
+    const parentData = parentVnode && parentVnode.data
+    defineReactive(vm, '$attrs', parentData && parentData.attrs || emptyObject, null, true)
+    defineReactive(vm, '$listeners', options._parentListeners || emptyObject, null, true)
+
 }
