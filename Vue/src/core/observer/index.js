@@ -1,4 +1,10 @@
 import { isArray, isValidArrayIndex, hasOwn } from '../util/index'
+
+export let shouldObserve = true  // 用于开启或关闭响应式数据的开关
+
+export function toggleObserving(value) {
+    shouldObserve = value
+}
 export function set(target, key, val) {
     const ob = target.__ob__
     // 这里处理的是$set([],key,val)的情况，也就是直接操作数组的下标，这时候手动用splice进行更新

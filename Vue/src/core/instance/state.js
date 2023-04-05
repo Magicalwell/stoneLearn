@@ -1,7 +1,7 @@
 import { isPlainObject } from '../util/index'
 import Watcher from '../observer/watcher'
 import Dep, { pushTarget, popTarget } from '../observer/dep'
-import { set, del } from '../observer/index'
+import { set, del, toggleObserving } from '../observer/index'
 function createWatcher(vm, expOrFn, handler, options) {
   // 判断传入的handler也就是回调函数是不是对象，对应watch的一种写法：
   // message: {
@@ -16,6 +16,18 @@ function createWatcher(vm, expOrFn, handler, options) {
   }
   // 到这里的时候handler只能是函数形式的  vm.$watch其实就是再次调用Vue.prototype.$watch，只不过经过处理后，不会再走进isPlainObject(cb)判断中了
   return vm.$watch(expOrFn, handler, options)
+}
+function initProps(vm, propsOptions) {
+  // 这里的propsData是由extend出来或者选项中给了才会有的，通常情况下为空，只是由子组件渲染逻辑出来的才有
+  const propsData = vm.$options.propsData || {}
+  const props = vm._props = {} // 用于保存后续添加的prop，这个属性是所有的prop，可以在vue中取到
+  // 这里缓存key并且挂载到options上面，并且在这里保留一个指针keys方便调用
+  const keys = vm.$options._propKeys = []
+  const isRoot = !vm.$parent
+  if (!isRoot) {
+    // 如果不是根组件，那么取消对响应式数据的观测，这样是因为子组件只需要观测父组件传递下来的数据和内部的数据，等到后续操作完成后会重新开启响应式数据的观测
+    toggleObserving(false)
+  }
 }
 export function stateMixin(Vue) {
   const dataDef = {}
@@ -48,4 +60,7 @@ export function stateMixin(Vue) {
 
 export function initState(vm) {
   vm._watchers = []
+  const opts = vm.$options
+  // 下面依次进行props methods data computed watch的初始化，后面的不能访问到前面的
+  if (opts.props) initProps(vm, opts.props)
 }
