@@ -1,4 +1,4 @@
-import { isPlainObject } from '../util/index'
+import { isPlainObject, validateProp } from '../util/index'
 import Watcher from '../observer/watcher'
 import Dep, { pushTarget, popTarget } from '../observer/dep'
 import { set, del, toggleObserving } from '../observer/index'
@@ -18,7 +18,7 @@ function createWatcher(vm, expOrFn, handler, options) {
   return vm.$watch(expOrFn, handler, options)
 }
 function initProps(vm, propsOptions) {
-  // 这里的propsData是由extend出来或者选项中给了才会有的，通常情况下为空，只是由子组件渲染逻辑出来的才有
+  // 这里的propsData是由extend出来或者选项中给了才会有的，通常情况下为空，只是由子组件渲染逻辑出来的才有存,放父组件传入子组件的props,具体是在父组件创建vnode时，走到子组件的占位符这里然后就是子组件的创建逻辑，createComponent中  const propsData = extractPropsFromVNodeData(data, Ctor, tag)提取了父组件传递过来的props，然后创建vnode时当做属性传递进去，详见：https://juejin.cn/post/6844904160597377031
   const propsData = vm.$options.propsData || {}
   const props = vm._props = {} // 用于保存后续添加的prop，这个属性是所有的prop，可以在vue中取到
   // 这里缓存key并且挂载到options上面，并且在这里保留一个指针keys方便调用
@@ -27,6 +27,10 @@ function initProps(vm, propsOptions) {
   if (!isRoot) {
     // 如果不是根组件，那么取消对响应式数据的观测，这样是因为子组件只需要观测父组件传递下来的数据和内部的数据，等到后续操作完成后会重新开启响应式数据的观测
     toggleObserving(false)
+  }
+  for (const key in propsOptions) {
+    keys.push(key) // keys是options._propKeys的引用，所以相当于把key压入options
+    const value = validateProp(key, propsOptions, propsData, vm)
   }
 }
 export function stateMixin(Vue) {
