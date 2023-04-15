@@ -2,6 +2,15 @@ const hasOwnProperty = Object.prototype.hasOwnProperty
 export const isArray = Array.isArray
 const _toString = Object.prototype.toString
 const camelizeRE = /-(\w)/g
+
+const hyphenateRE = /\B([A-Z])/g
+export function isObject(obj) {
+    return obj !== null && typeof obj === 'object'
+}
+export const hyphenate = cached((str) => {
+    return str.replace(hyphenateRE, '-$1').toLowerCase()
+})
+
 export function hasOwn(obj, key) {
     return hasOwnProperty.call(obj, key)
 }

@@ -1,10 +1,12 @@
-import { isArray, isValidArrayIndex, hasOwn } from '../util/index'
+import { isArray, isValidArrayIndex, hasOwn, isObject } from '../util/index'
 
 export let shouldObserve = true  // 用于开启或关闭响应式数据的开关
 
 export function toggleObserving(value) {
     shouldObserve = value
 }
+export class Observer { }
+
 export function set(target, key, val) {
     const ob = target.__ob__
     // 这里处理的是$set([],key,val)的情况，也就是直接操作数组的下标，这时候手动用splice进行更新
@@ -51,5 +53,16 @@ export function del(target, key) {
         return
     }
     ob.dep.notify()
+}
+export function observe(value, asRootData) {
+    if (!isObject(value) || value instanceof VNode) {
+        // 不是对象或vnode节点不观测，这里observe一般传入data
+        return
+    }
+    let ob
+    if (hasOwn(value, '__ob__') && value.__ob__ instanceof Observer) {
+        // 如果已经被观测过，则直接拿来
+        ob = value.__ob__
+    }
 }
 export function defineReactive() { }
