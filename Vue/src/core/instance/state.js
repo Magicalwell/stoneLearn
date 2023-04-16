@@ -1,7 +1,9 @@
-import { isPlainObject, validateProp } from '../util/index'
+import { isPlainObject, validateProp, isServerRendering } from '../util/index'
 import Watcher from '../observer/watcher'
 import Dep, { pushTarget, popTarget } from '../observer/dep'
-import { set, del, toggleObserving } from '../observer/index'
+import { set, del, toggleObserving, defineReactive, observe } from '../observer/index'
+import { hasOwn, noop } from '../../shared/util'
+const computedWatcherOptions = { lazy: true }
 function createWatcher(vm, expOrFn, handler, options) {
   // 判断传入的handler也就是回调函数是不是对象，对应watch的一种写法：
   // message: {
@@ -31,6 +33,72 @@ function initProps(vm, propsOptions) {
   for (const key in propsOptions) {
     keys.push(key) // keys是options._propKeys的引用，所以相当于把key压入options
     const value = validateProp(key, propsOptions, propsData, vm)
+    defineReactive(props, key, value)
+    if (!(key in vm)) {
+      // 如果vm上面没有，则把_prop代理到vm上面，也这是为什么在代码中可以直接this.访问到prop
+      proxy(vm, '_props', key)
+    }
+  }
+  toggleObserving(true)
+}
+function initMethods(vm, methods) {
+  // methods的处理逻辑很简单，通过bind改变this即可，然后挂载到vm上面
+  for (const key in methods) {
+    vm[key] = typeof methods[key] !== 'function' ? noop : bind(methods[key], vm)
+  }
+}
+function initData(vm) {
+  let data = vm.$options.data
+  data = vm._data = typeof data === 'function' ? getData(data, vm) : data || {}
+  if (!isPlainObject(data)) {
+    data = {}
+  }
+  const keys = Object.keys(data)
+  const props = vm.$options.props
+  const methods = vm.$options.methods
+  let i = keys.length
+  while (i--) {
+    const key = keys[i]
+    // 这里分别判断data中的key是否和prop methods中有重复
+    if (process.env.NODE_ENV !== 'production') {
+      if (methods && hasOwn(methods, key)) {
+        noop()
+      }
+    }
+    if (props && hasOwn(props, key)) {
+      noop()
+    } else if (!isReserved(key)) {
+      proxy(vm, '_data', key)
+    }
+  }
+  observe(data, true) // asRootData
+}
+function initComputed(vm, computed) {
+  // 在vm上创建一个watcher数组用于保存计算属性的watcher
+  const watchers = vm._computedWatchers = Object.create(null)
+  const isSSR = isServerRendering()
+  for (const key in computed) {
+    const userDef = computed[key]
+    //获取用户定义的计算属性，有两种方式，一种是a (return) 一种是以get和set方式写的是个对象
+    const getter = typeof userDef === 'function' ? userDef : userDef.get
+    if (!isSSR) {
+      watchers[key] = new Watcher(vm, getter || noop, noop, computedWatcherOptions)
+    }
+    if (!(key in vm)) {
+      defineComputed(vm, key, userDef)
+    }
+  }
+
+}
+export function getData(data, vm) {
+  pushTarget() //将一个无效的undefined加入调用栈的顶部，以在操作响应式数据的时候不添加不必要的依赖
+  try {
+    return data.call(vm, vm)
+  } catch (e) {
+    handleError(e, vm, `data()`)
+    return {}
+  } finally {
+    popTarget()
   }
 }
 export function stateMixin(Vue) {
@@ -67,4 +135,14 @@ export function initState(vm) {
   const opts = vm.$options
   // 下面依次进行props methods data computed watch的初始化，后面的不能访问到前面的
   if (opts.props) initProps(vm, opts.props)
+  if (opts.methods) initMethods(vm, opts.methods)
+  if (opts.data) {
+    initData(vm)
+  } else {
+    observe(vm._data = {}, true)
+  }
+  if (opts.computed) initComputed(vm, opts.computed)
+  if (opts.watch && opts.watch !== nativeWatch) {
+    initWatch(vm, opts.watch)
+  }
 }

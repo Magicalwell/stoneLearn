@@ -66,4 +66,5 @@ export function validateProp(key, propOptions, propsData, vm) {
     observe(value) // 默认为对象或vnode则响应式观测一下
     toggleObserving(prevShouldObserve)
   }
+  return value
 }

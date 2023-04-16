@@ -4,6 +4,7 @@ const _toString = Object.prototype.toString
 const camelizeRE = /-(\w)/g
 
 const hyphenateRE = /\B([A-Z])/g
+export function noop(a, b, c) { }
 export function isObject(obj) {
     return obj !== null && typeof obj === 'object'
 }

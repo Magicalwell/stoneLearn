@@ -1,4 +1,4 @@
-import { isArray, isValidArrayIndex, hasOwn, isObject } from '../util/index'
+import { isArray, isValidArrayIndex, hasOwn, isObject, isPlainObject } from '../util/index'
 
 export let shouldObserve = true  // 用于开启或关闭响应式数据的开关
 
@@ -61,8 +61,24 @@ export function observe(value, asRootData) {
     }
     let ob
     if (hasOwn(value, '__ob__') && value.__ob__ instanceof Observer) {
-        // 如果已经被观测过，则直接拿来
+        // 如果已经被观测过，则直接拿来返回
         ob = value.__ob__
+    } else if (shouldObserve && !isServerRendering() && (Array.isArray(value) || isPlainObject(value)) && Object.isExtensible(value) && !value._isVue) {
+        // shouldObserve：这个变量控制着是否需要将变量转换为响应式数据。如果它的值为 false，则表示不需要将变量转换为响应式数据。当 Vue.js 初始化时，会根据用户传递的选项参数来决定 shouldObserve 的值。
+
+        // !isServerRendering()：这个方法用来判断当前代码是否在服务器端渲染的环境中执行，如果是，则不能将变量转换为响应式数据。
+
+        // (Array.isArray(value) || isPlainObject(value))：这个条件判断了变量的类型是否为数组或者纯对象，只有数组和纯对象才能被转换为响应式数据。
+
+        // Object.isExtensible(value)：这个方法用来检查对象是否可以添加新的属性。只有能够添加新属性的对象才能被转换为响应式数据。
+
+        // !value._isVue：这个条件判断了变量是否已经是 Vue 实例，如果是，则不需要再将它转换为响应式数据。
+        ob = new Observer(value)
     }
+    if (asRootData && ob) {
+        // 用来计数，表示ob被多少vue实例引用
+        ob.vmCount++
+    }
+    return ob
 }
 export function defineReactive() { }
