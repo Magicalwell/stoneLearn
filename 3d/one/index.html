@@ -13,11 +13,16 @@
   <script type="importmap">
     {
       "imports": {
-        "three": "../engine/three.module.min.js",
+        "three": "../engine/three.module.min.js/"
       }
     }
   </script>
-  <script src="./js/index.js"></script>
+  <script src="../engine/three.module.min.js" type="module"></script>
+  <!-- <script src="./js/index.js" type="module"></script> -->
+  <script type="module">
+    import * as THREE from 'three';
+    console.log(THREE, ';;;;;;;;;;;;;');
+  </script>
 </body>
 
 </html>
