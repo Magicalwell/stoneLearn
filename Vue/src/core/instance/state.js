@@ -1,9 +1,15 @@
-import { isPlainObject, validateProp, isServerRendering } from '../util/index'
+import { isPlainObject, validateProp, isServerRendering, nativeWatch } from '../util/index'
 import Watcher from '../observer/watcher'
 import Dep, { pushTarget, popTarget } from '../observer/dep'
 import { set, del, toggleObserving, defineReactive, observe } from '../observer/index'
 import { hasOwn, noop } from '../../shared/util'
 const computedWatcherOptions = { lazy: true }
+const sharedPropertyDefinition = {
+  enumerable: true,
+  configurable: true,
+  get: noop,
+  set: noop
+}
 function createWatcher(vm, expOrFn, handler, options) {
   // 判断传入的handler也就是回调函数是不是对象，对应watch的一种写法：
   // message: {
@@ -82,13 +88,63 @@ function initComputed(vm, computed) {
     //获取用户定义的计算属性，有两种方式，一种是a (return) 一种是以get和set方式写的是个对象
     const getter = typeof userDef === 'function' ? userDef : userDef.get
     if (!isSSR) {
-      watchers[key] = new Watcher(vm, getter || noop, noop, computedWatcherOptions)
+      watchers[key] = new Watcher(vm, getter || noop, noop, computedWatcherOptions)  //一个组件会有一套watcher，也就是那3中：渲染，计算，普通watcher,主要做了：1.让dep添加自己，自己也添加dep，2.数据更新
     }
     if (!(key in vm)) {
-      defineComputed(vm, key, userDef)
+      defineComputed(vm, key, userDef) //处理计算属性，详细见下方
     }
   }
 
+}
+function createGetterInvoker(fn) {
+  return function computedGetter() {
+    return fn.call(this, this)
+  }
+}
+function createComputedGetter(key) {
+  return function computedGetter() {
+    // 先获取计算属性的watcher  这个在初始化阶段就会有了  vue中有三个watcher  渲染阶段的render watcher  计算属性的watcher和普通的
+    const watcher = this._computedWatchers && this._computedWatchers[key]
+    if (watcher) {
+      // 这个dirty是watcher身上的属性,为true才会重新计算，这就是缓存的关键
+      if (watcher.dirty) {
+        watcher.evaluate()
+      }
+      // 用于收集访问到的属性的dep
+      if (Dep.target) {
+        watcher.depend()
+      }
+      return watcher.value
+    }
+  }
+}
+function initWatch(vm, watch) {
+  for (const key in watch) {
+    // 遍历用户定义的watch
+    const handler = watch[key]
+    if (Array.isArray(handler)) {
+      // 这里是传入了数组，数组中每一项都是一个函数，这里进行处理挨个创建watcher
+      for (let i = 0; i < handler.length; i++) {
+        createWatcher(vm, key, handler[i])
+      }
+    } else {
+      createWatcher(vm, key, handler)
+    }
+  }
+}
+// 计算属性因为存在缓存，所以要做处理
+export function defineComputed(target, key, userDef) {
+  // 判断运行在什么平台上，服务端的话就不给缓存了，直接调用用错误处理工厂函数包装之后的用户定义的userDef
+  const shouldCache = !isServerRendering()
+  if (typeof userDef === 'function') {
+    sharedPropertyDefinition.get = shouldCache ? createComputedGetter(key) : createGetterInvoker(userDef)
+    sharedPropertyDefinition.set = noop
+  } else {
+    // 用get和set方式定义的computed  先判断是否给了get然后走到跟上面一样的判断逻辑中
+    sharedPropertyDefinition.get = userDef.get ? shouldCache && userDef.cache !== false ? createComputedGetter(key) : createGetterInvoker(userDef.get) : noop
+    sharedPropertyDefinition.set = userDef.set || noop
+  }
+  Object.defineProperty(target, key, sharedPropertyDefinition)
 }
 export function getData(data, vm) {
   pushTarget() //将一个无效的undefined加入调用栈的顶部，以在操作响应式数据的时候不添加不必要的依赖
@@ -133,7 +189,7 @@ export function stateMixin(Vue) {
 export function initState(vm) {
   vm._watchers = []
   const opts = vm.$options
-  // 下面依次进行props methods data computed watch的初始化，后面的不能访问到前面的
+  // 下面依次进行props methods data computed watch的初始化
   if (opts.props) initProps(vm, opts.props)
   if (opts.methods) initMethods(vm, opts.methods)
   if (opts.data) {

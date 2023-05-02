@@ -1,3 +1,4 @@
+import Dep from './dep'
 import { isArray, isValidArrayIndex, hasOwn, isObject, isPlainObject } from '../util/index'
 
 export let shouldObserve = true  // 用于开启或关闭响应式数据的开关
@@ -73,7 +74,7 @@ export function observe(value, asRootData) {
         // Object.isExtensible(value)：这个方法用来检查对象是否可以添加新的属性。只有能够添加新属性的对象才能被转换为响应式数据。
 
         // !value._isVue：这个条件判断了变量是否已经是 Vue 实例，如果是，则不需要再将它转换为响应式数据。
-        ob = new Observer(value)
+        ob = new Observer(value) // 创建观察者
     }
     if (asRootData && ob) {
         // 用来计数，表示ob被多少vue实例引用
@@ -81,4 +82,6 @@ export function observe(value, asRootData) {
     }
     return ob
 }
-export function defineReactive() { }
+export function defineReactive(obj, key, val, customSetter, shallow) {
+    const dep = new Dep()  //dep可以理解为依赖管理器，每个属性都有，它保存依赖自身的watch，负责在更新时通知watch更新数据。
+}
