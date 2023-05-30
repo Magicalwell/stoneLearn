@@ -10,6 +10,17 @@ const sharedPropertyDefinition = {
   get: noop,
   set: noop
 }
+
+export function proxy (target, sourceKey, key) {
+  // 把key转换成描述器代理到target上，注意这里sourcekey为字符串，只能有一层例如a:{b:1,c:{d:2}},key只能代理bc不能d。再深的层级要在外部递归。
+  sharedPropertyDefinition.get = function proxyGetter () {
+    return this[sourceKey][key]
+  }
+  sharedPropertyDefinition.set = function proxySetter (val) {
+    this[sourceKey][key] = val
+  }
+  Object.defineProperty(target, key, sharedPropertyDefinition)
+}
 function createWatcher(vm, expOrFn, handler, options) {
   // 判断传入的handler也就是回调函数是不是对象，对应watch的一种写法：
   // message: {
@@ -103,7 +114,8 @@ function createGetterInvoker(fn) {
 }
 function createComputedGetter(key) {
   return function computedGetter() {
-    // 先获取计算属性的watcher  这个在初始化阶段就会有了  vue中有三个watcher  渲染阶段的render watcher  计算属性的watcher和普通的
+    // 先获取计算属性的watcher  这个在初始化阶段就会有了  vue中有三个watcher  渲染阶段的render watcher  计算属性的watcher和普通的，这里this是组件实例
+    //  initComputed const watchers = vm._computedWatchers = Object.create(null)
     const watcher = this._computedWatchers && this._computedWatchers[key]
     if (watcher) {
       // 这个dirty是watcher身上的属性,为true才会重新计算，这就是缓存的关键

@@ -84,4 +84,62 @@ export function observe(value, asRootData) {
 }
 export function defineReactive(obj, key, val, customSetter, shallow) {
     const dep = new Dep()  //dep可以理解为依赖管理器，每个属性都有，它保存依赖自身的watch，负责在更新时通知watch更新数据。
+    // 判断key是不是object内置的，并且判断是否可以设置
+    const property = Object.getOwnPropertyDescriptor(obj, key)
+    // property返回的是属性的描述器，由value,writable,get,set,configurable,enumerable组成
+    if (property && property.configurable === false) {
+        return
+    }
+    const getter = property && property.get
+    const setter = property && property.set
+    // 判断只有setter且只传入了两个参数 obj和key的情况，手动给val给值
+    if ((!getter || setter) && arguments.length === 2) {
+        val = obj[key]
+    }
+    let childOb = !shallow && observe(val) // 是否递归将子对象的属性也转为get set
+    // 下面就是耳熟能详的object.definedproperty
+    Object.defineProperty(obj, key, {
+        enumerable: true,
+        configurable: true,
+        get: function reactiveGetter() {
+            const value = getter ? getter.call(obj) : val
+            // 如果目前有watcher在全局的target上，则收集依赖
+            if (Dep.target) {
+                dep.depend()
+                if (childOb) {
+                    // 有子对象，递归调用depend
+                    childOb.dep.depend()
+                    if (Array.isArray(value)) {
+                        dependArray(value)
+                    }
+                }
+            }
+        },
+        set: function reactiveSetter(newVal) {
+            const value = getter ? getter.call(obj) : val
+            // 下面的判断用于判断新值是否与旧值相等  第二个或的判断 自身与自身比较主要是为了判断NaN
+            if (newVal === value || (newVal !== newVal && value !== value)) {
+                return
+            }
+            // 有getter没setter直接返回
+            if (getter && !setter) return
+            if (setter) {
+                setter.call(obj, newVal)
+            } else {
+                val = newVal
+            }
+            childOb = !shallow && observe(newVal)
+            dep.notify()  //通知更新
+        }
+    })
+
+}
+function dependArray(value) {
+    for (let e, i = 0, l = value.length; i < l; i++) {
+        e = value[i]
+        e && e.__ob__ && e.__ob__.dep.depend()
+        if (Array.isArray(e)) {
+            dependArray(e)
+        }
+    }
 }
