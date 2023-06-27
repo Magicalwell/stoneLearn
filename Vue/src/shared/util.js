@@ -1,5 +1,6 @@
 const hasOwnProperty = Object.prototype.hasOwnProperty
 export const isArray = Array.isArray
+export const emptyObject = Object.freeze({})
 const _toString = Object.prototype.toString
 const camelizeRE = /-(\w)/g
 

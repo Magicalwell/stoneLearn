@@ -1,4 +1,5 @@
-import { nextTick } from "../util/index"
+import { nextTick, emptyObject } from "../util/index"
+import { resolveSlots } from './render-helpers/resolve-slots'
 
 export function renderMixin(Vue) {
     // 到这里才把nexttick挂载到原型上，并且自动填充了其中的一个参数为当前的vue实例

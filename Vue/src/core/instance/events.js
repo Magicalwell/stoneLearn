@@ -1,6 +1,7 @@
 import {
   toArray, invokeWithErrorHandling
 } from '../util/index'
+import { updateListeners } from '../vdom/helpers/index'
 let target
 function add(event, fn) {
   target.$on(event, fn)

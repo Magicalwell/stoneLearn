@@ -6,7 +6,7 @@ export function isReserved(str) {
 }
 
 const bailRE = new RegExp(`[^${unicodeRegExp.source}.$_\\d]`)
-export function parsePath (path) {
+export function parsePath(path) {
   if (bailRE.test(path)) {
     return
   }
@@ -18,4 +18,12 @@ export function parsePath (path) {
     }
     return obj
   }
+}
+export function def(obj, key, val, enumerable) {
+  Object.defineProperty(obj, key, {
+    value: val,
+    enumerable: !!enumerable,
+    writable: true,
+    configurable: true
+  })
 }

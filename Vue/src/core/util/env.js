@@ -1,6 +1,8 @@
 export const inBrowser = typeof window !== 'undefined'
 export const inWeex = typeof WXEnvironment !== 'undefined' && !!WXEnvironment.platform
 export const nativeWatch = ({}).watch
+export const hasProto = '__proto__' in {}
+let _Set
 let _isServer
 export function isNative(Ctor) {
   return typeof Ctor === 'function' && /native code/.test(Ctor.toString())
@@ -18,3 +20,4 @@ export const isServerRendering = () => {
   }
   return _isServer
 }
+export { _Set }

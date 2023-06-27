@@ -1,12 +1,45 @@
 import Dep from './dep'
-import { isArray, isValidArrayIndex, hasOwn, isObject, isPlainObject } from '../util/index'
+import { isArray, isValidArrayIndex, hasOwn, isObject, isPlainObject, hasProto } from '../util/index'
+import { arrayMethods } from './array'
 
+const arrayKeys = Object.getOwnPropertyNames(arrayMethods)
 export let shouldObserve = true  // 用于开启或关闭响应式数据的开关
 
 export function toggleObserving(value) {
     shouldObserve = value
 }
-export class Observer { }
+export class Observer {
+    constructor(value) {
+        this.value = value
+        this.dep = new Dep()
+        this.vmCount = 0
+        if (Array.isArray(value)) {
+            // 这里处理数组，数组的响应式不是对每一项进行响应式处理，而是改写数组的一些修改方法，例如push等，在操作结束后手动去通知更新
+            // 下面进行的判断是为了兼容某些环境下数组对象不继承object对象，这里有点疑问具体是哪些情况？有一种情况是通过object.create(null)创建的
+            // 但是这里又是写死的判断，感觉这里可以近似看做是true
+            if (hasProto) {
+                protoAugment(value, arrayMethods)
+            } else {
+                copyAugment(value, arrayMethods, arrayKeys)
+            }
+            this.observeArray(value)
+        } else {
+            // 对象类型直接walk遍历去做响应式代理
+            this.walk(value)
+        }
+    }
+    walk(obj) {
+        const keys = Object.keys(obj)
+        for (let i = 0; i < keys.length; i++) {
+            defineReactive(obj, keys[i])
+        }
+    }
+    observeArray(items) {
+        for (let i = 0, l = items.length; i < l; i++) {
+            observe(items[i])
+        }
+    }
+}
 
 export function set(target, key, val) {
     const ob = target.__ob__
@@ -142,4 +175,7 @@ function dependArray(value) {
             dependArray(e)
         }
     }
+}
+function protoAugment(target, src) {
+    target.__proto__ = src
 }

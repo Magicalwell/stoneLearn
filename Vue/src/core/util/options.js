@@ -117,6 +117,7 @@ export function mergeOptions(parent,
     }
     function mergeField(key) {
         /*strats里面存了options中每一个属性（el、props、watch等等）的合并方法，先取出*/
+        // strats里面预设了一些属性的合并策略，根据key值来确定用哪个方法
         const strat = strats[key] || defaultStrat
         /*根据合并方法来合并两个option*/
         options[key] = strat(parent[key], child[key], vm, key)
