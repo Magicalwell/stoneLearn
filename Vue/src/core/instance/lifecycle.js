@@ -1,3 +1,5 @@
+import { popTarget, pushTarget } from "../observer/dep"
+// import { invokeWithErrorHandling } from "../util"
 
 export let activeInstance = null
 export function setActiveInstance(vm) {
@@ -32,8 +34,22 @@ export function initLifecycle(vm) {
 
 }
 
-export function callHook(vm) {
-
+export function callHook(vm, hook) {
+  // 同普通watcher一样，在执行时需要压入undefined进入Dep.target，防止添加多余的依赖
+  pushTarget()
+  const handlers = vm.$options[hook]
+  const info = ''
+  if (handlers) {
+    console.log(vm.test,'===============');
+    handlers.call(vm)
+    // for (let i = 0, j = handlers.length; i < j; i++) {
+    //   // invokeWithErrorHandling(handlers[i], vm, null, vm, info)
+    // }
+  }
+  if (vm._hasHookEvent) {
+    vm.$emit('hook' + hook)
+  }
+  popTarget()
 }
 export function lifecycleMixin(Vue) {
   // 这个方法就干了一件事，给原型上拓展更新dom的方法，也就是diff的入口
@@ -78,9 +94,9 @@ export function lifecycleMixin(Vue) {
     callHook(vm, 'beforeDestory')
     vm._isBeingDestroyed = true
     const parent = vm.$parent
-    if (parent&& !parent._isBeingDestroyed&& !vm.$options.abstract) {
+    if (parent && !parent._isBeingDestroyed && !vm.$options.abstract) {
       // 获取到父节点，如果父节点存在且没有在销毁进程中，子节点本身也不是抽象节点的情况下，从父节点的children list中移除，如果子节点是抽象节点，在这个list中根本不会被添加
-      remove(parent.$children,vm)
+      remove(parent.$children, vm)
     }
     if (vm._watcher) {
       // 清除vm的watcher

@@ -43,8 +43,28 @@ export default class Watcher {
             ? undefined
             : this.get()
     }
+    addDep(dep) {
+        const id = dep.id
+        if (!this.newDepIds.has(id)) {
+            // 保存dep的id进字典，并且缓存dep，方便后续的操作
+            // 这里的两个dep字典之前说过了，用来对比更新前后依赖的dep是否有变化，因为可能由于v-if条件渲染不同的内容，不被显示的没必要添加依赖
+            this.newDepIds.add(id)
+            this.newDeps.push(dep)
+            if (!this.depIds.has(id)) {
+                // 这里就是有变化了  需要建立依赖
+                dep.addSub(this)
+            }
+        }
+    }
     evaluate() {
         this.value = this.get()
         this.dirty = false
+    }
+    depend() {
+        let i = this.deps.length
+        while (i--) {
+            this.deps[i].depend()
+            // dep.target.adddep(this) 实际上是用当前全局的watcher调用adddep方法，收集dep
+        }
     }
 }

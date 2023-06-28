@@ -1,4 +1,4 @@
-import { nextTick, emptyObject } from "../util/index"
+import { nextTick, emptyObject, defineReactive } from "../util/index"
 import { resolveSlots } from './render-helpers/resolve-slots'
 
 export function renderMixin(Vue) {

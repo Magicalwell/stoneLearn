@@ -1,4 +1,4 @@
-import { isPlainObject, validateProp, isServerRendering, nativeWatch } from '../util/index'
+import { isPlainObject, validateProp, isServerRendering, nativeWatch, isReserved } from '../util/index'
 import Watcher from '../observer/watcher'
 import Dep, { pushTarget, popTarget } from '../observer/dep'
 import { set, del, toggleObserving, defineReactive, observe } from '../observer/index'
@@ -11,12 +11,12 @@ const sharedPropertyDefinition = {
   set: noop
 }
 
-export function proxy (target, sourceKey, key) {
+export function proxy(target, sourceKey, key) {
   // 把key转换成描述器代理到target上，注意这里sourcekey为字符串，只能有一层例如a:{b:1,c:{d:2}},key只能代理bc不能d。再深的层级要在外部递归。
-  sharedPropertyDefinition.get = function proxyGetter () {
+  sharedPropertyDefinition.get = function proxyGetter() {
     return this[sourceKey][key]
   }
-  sharedPropertyDefinition.set = function proxySetter (val) {
+  sharedPropertyDefinition.set = function proxySetter(val) {
     this[sourceKey][key] = val
   }
   Object.defineProperty(target, key, sharedPropertyDefinition)
@@ -66,6 +66,7 @@ function initMethods(vm, methods) {
 }
 function initData(vm) {
   let data = vm.$options.data
+  console.log(vm,'------------datadata-');
   data = vm._data = typeof data === 'function' ? getData(data, vm) : data || {}
   if (!isPlainObject(data)) {
     data = {}

@@ -11,7 +11,7 @@
     var camelizeRE = /-(\w)/g;
 
     var hyphenateRE = /\B([A-Z])/g;
-    function noop(a, b, c) { }
+    function noop$1(a, b, c) { }
     function isObject(obj) {
         return obj !== null && typeof obj === 'object'
     }
@@ -79,6 +79,11 @@
 
     var unicodeRegExp = /a-zA-Z\u00B7\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u037D\u037F-\u1FFF\u200C-\u200D\u203F-\u2040\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD/;
 
+    function isReserved(str) {
+      var c = (str + '').charCodeAt(0);
+      return c === 0x24 || c === 0x5F
+    }
+
     var bailRE = new RegExp(("[^" + (unicodeRegExp.source) + ".$_\\d]"));
     function parsePath(path) {
       if (bailRE.test(path)) {
@@ -106,12 +111,15 @@
     var inWeex = typeof WXEnvironment !== 'undefined' && !!WXEnvironment.platform;
     var nativeWatch = ({}).watch;
     var hasProto = '__proto__' in {};
+    var hasSymbol =
+      typeof Symbol !== 'undefined' && isNative(Symbol) &&
+      typeof Reflect !== 'undefined' && isNative(Reflect.ownKeys);
     var _Set;
     var _isServer;
     function isNative(Ctor) {
       return typeof Ctor === 'function' && /native code/.test(Ctor.toString())
     }
-    var isServerRendering$1 = function () {
+    var isServerRendering = function () {
       if (_isServer === undefined) {
         /* istanbul ignore if */
         if (!inBrowser && !inWeex && typeof global !== 'undefined') {
@@ -131,6 +139,275 @@
          */
         optionMergeStrategies: Object.create(null)
     });
+
+    var uid$2 = 0;
+    var Dep = function Dep() {
+      this.id = uid$2++;
+      this.subs = [];
+    };
+    Dep.prototype.addSub = function addSub (sub) {
+      this.subs.push(sub);
+    };
+
+    Dep.prototype.removeSub = function removeSub (sub) {
+      remove$2(this.subs, sub);
+    };
+
+    Dep.prototype.depend = function depend () {
+      // 如果当前有全局的watcher，则相当于在收集依赖，把自身添加到watcher中去
+      if (Dep.target) {
+        Dep.target.addDep(this);
+      }
+    };
+
+    Dep.prototype.notify = function notify () {
+      // 内容有变动，通知更新
+      var subs = this.subs.slice();
+      for (var i = 0, l = subs.length; i < l; i++) {
+        subs[i].update();
+      }
+    };
+
+    Dep.target = null;  // 这里存放当前全局的watcher
+    var targetStack = []; //watcher的栈
+
+    function pushTarget(target) {
+      targetStack.push(target);
+      Dep.target = target;
+    }
+
+    function popTarget() {
+      targetStack.pop();
+      Dep.target = targetStack[targetStack.length - 1];
+    }
+
+    var VNode$1 = function VNode () {};
+
+    var arrayProto = Array.prototype;
+    var arrayMethods = Object.create(arrayProto);
+
+    // 几种对数组进行修改的方法，需要进行拓展，主动进行响应式的通知
+    var methodsToPatch = [
+        'push',
+        'pop',
+        'shift',
+        'unshift',
+        'splice',
+        'sort',
+        'reverse'
+    ];
+    // 这里不用es6箭头函数是因为this的指向问题,用箭头函数则this会指到window，而这里需要this指向当前的method
+    // 为什么这里用function时，内部this为foreach的当前项？因为foreach内部实现其实就是遍历然后调用传入的函数，method传入的是this[i]，相当于是当前的项
+    methodsToPatch.forEach(function (method) {
+        var original = arrayProto[method]; //获取到原生的方法
+        def(arrayMethods, method, function mutator() {
+            var args = [], len = arguments.length;
+            while ( len-- ) args[ len ] = arguments[ len ];
+
+            var result = original.apply(this, args); //先保有原生的方法逻辑，并调用一遍，在最后响应式逻辑执行完后返回。等同于切片重写
+            var ob = this.__ob__;
+            var inserted;
+            switch (method) {
+                case 'push':
+                case 'unshift':
+                    inserted = args;
+                    break;
+                case 'splice':
+                    inserted = args.slice(2);
+                    break;
+            }
+            if (inserted) { ob.observeArray(inserted); }
+            ob.dep.notify();
+            return result
+        });
+    });
+
+    var arrayKeys = Object.getOwnPropertyNames(arrayMethods);
+    var shouldObserve = true;  // 用于开启或关闭响应式数据的开关
+
+    function toggleObserving$1(value) {
+        shouldObserve = value;
+    }
+    var Observer = function Observer(value) {
+        this.value = value;
+        this.dep = new Dep();
+        this.vmCount = 0;
+        def(value, '__ob__', this); //把自己挂载value上的__ob__中去
+        if (Array.isArray(value)) {
+            // 这里处理数组，数组的响应式不是对每一项进行响应式处理，而是改写数组的一些修改方法，例如push等，在操作结束后手动去通知更新
+            // 下面进行的判断是为了兼容某些环境下数组对象不继承object对象，这里有点疑问具体是哪些情况？有一种情况是通过object.create(null)创建的
+            // 但是这里又是写死的判断，感觉这里可以近似看做是true
+            if (hasProto) {
+                protoAugment(value, arrayMethods);
+            } else {
+                copyAugment(value, arrayMethods, arrayKeys);
+            }
+            this.observeArray(value);
+        } else {
+            // 对象类型直接walk遍历去做响应式代理
+            this.walk(value);
+        }
+    };
+    Observer.prototype.walk = function walk (obj) {
+        var keys = Object.keys(obj);
+        for (var i = 0; i < keys.length; i++) {
+            defineReactive(obj, keys[i]);
+        }
+    };
+    Observer.prototype.observeArray = function observeArray (items) {
+        for (var i = 0, l = items.length; i < l; i++) {
+            observe(items[i]);
+        }
+    };
+
+    function set(target, key, val) {
+        var ob = target.__ob__;
+        // 这里处理的是$set([],key,val)的情况，也就是直接操作数组的下标，这时候手动用splice进行更新
+        if (isArray(target) && isValidArrayIndex(key)) {
+            // 处理长度变长的情况 直接修改length  key比length短的情况下不影响，splice做替换
+            target.length = Math.max(target.length, key);
+            target.splice(key, 1, val);
+            // 这里直接返回，因为数组不做响应式处理，采用重写array的七个方法实现，而上面的splice已经是被重写过的
+            return val
+        }
+        if (hasOwn(target, key)) {
+            // 如果是对象，且在目标target上面已经存在，直接重新赋值然后返回，这里会触发target【key】的set方法，进入响应式
+            target[key] = val;
+            return val
+        }
+        // 这里考虑到vue实例被保存在数据中的情况，例如componentsis可以直接传入vue实例渲染出来，这种情况就不能监听，因为会重复
+        if (target._isVue || (ob && ob.vmCount)) {
+            return val
+        }
+        // 处理非响应式数据
+        if (!ob) {
+            target[key] = val;
+            return val
+        }
+        // 逻辑走到这里就是正常的给一个对象中新增一个key，然后通知依赖了这个对象的watcher更新
+        defineReactive(ob.value, key, val);
+        ob.dep.notify();
+        return val
+    }
+    function del(target, key) {
+        // 先判断目标是不是数组，key是不是数字
+        if (isArray(target) && typeof key === 'number') {
+            target.splice(key, 1); // 调用被重写的数组方法
+            return
+        }
+        var ob = target.__ob__;
+        if (target._isVue || (ob && ob.vmCount)) {
+            return
+        }
+        // 没有key这个对象
+        if (!hasOwn(target, key)) {
+            return
+        }
+        delete target[key];
+        if (!ob) {
+            // 对象没有观察者，不是响应式，则直接返回啥也不做
+            return
+        }
+        ob.dep.notify();
+    }
+    function observe(value, asRootData) {
+        if (!isObject(value) || value instanceof VNode$1) {
+            // 不是对象或vnode节点不观测，这里observe一般传入data
+            return
+        }
+        var ob;
+        if (hasOwn(value, '__ob__') && value.__ob__ instanceof Observer) {
+            // 如果已经被观测过，则直接拿来返回
+            ob = value.__ob__;
+        } else if (shouldObserve && !isServerRendering() && (Array.isArray(value) || isPlainObject(value)) && Object.isExtensible(value) && !value._isVue) {
+            // shouldObserve：这个变量控制着是否需要将变量转换为响应式数据。如果它的值为 false，则表示不需要将变量转换为响应式数据。当 Vue.js 初始化时，会根据用户传递的选项参数来决定 shouldObserve 的值。
+
+            // !isServerRendering()：这个方法用来判断当前代码是否在服务器端渲染的环境中执行，如果是，则不能将变量转换为响应式数据。
+
+            // (Array.isArray(value) || isPlainObject(value))：这个条件判断了变量的类型是否为数组或者纯对象，只有数组和纯对象才能被转换为响应式数据。
+
+            // Object.isExtensible(value)：这个方法用来检查对象是否可以添加新的属性。只有能够添加新属性的对象才能被转换为响应式数据。
+
+            // !value._isVue：这个条件判断了变量是否已经是 Vue 实例，如果是，则不需要再将它转换为响应式数据。
+            ob = new Observer(value); // 创建观察者
+        }
+        if (asRootData && ob) {
+            // 用来计数，表示ob被多少vue实例引用
+            ob.vmCount++;
+        }
+        return ob
+    }
+    function defineReactive(obj, key, val, customSetter, shallow) {
+        var dep = new Dep();  //dep可以理解为依赖管理器，每个属性都有，它保存依赖自身的watch，负责在更新时通知watch更新数据。
+        // 判断key是不是object内置的，并且判断是否可以设置
+        var property = Object.getOwnPropertyDescriptor(obj, key);
+        // property返回的是属性的描述器，由value,writable,get,set,configurable,enumerable组成
+        if (property && property.configurable === false) {
+            return
+        }
+        var getter = property && property.get;
+        var setter = property && property.set;
+        // 判断只有setter且只传入了两个参数 obj和key的情况，手动给val给值
+        if ((!getter || setter) && arguments.length === 2) {
+            val = obj[key];
+        }
+        var childOb = !shallow && observe(val); // 是否递归将子对象的属性也转为get set
+        // 下面就是耳熟能详的object.definedproperty
+        Object.defineProperty(obj, key, {
+            enumerable: true,
+            configurable: true,
+            get: function reactiveGetter() {
+                var value = getter ? getter.call(obj) : val;
+                // 如果目前有watcher在全局的target上，则收集依赖
+                if (Dep.target) {
+                    dep.depend();
+                    if (childOb) {
+                        // 有子对象，递归调用depend
+                        childOb.dep.depend();
+                        if (Array.isArray(value)) {
+                            dependArray(value);
+                        }
+                    }
+                }
+                return value
+            },
+            set: function reactiveSetter(newVal) {
+                var value = getter ? getter.call(obj) : val;
+                // 下面的判断用于判断新值是否与旧值相等  第二个或的判断 自身与自身比较主要是为了判断NaN
+                if (newVal === value || (newVal !== newVal && value !== value)) {
+                    return
+                }
+                // 有getter没setter直接返回
+                if (getter && !setter) { return }
+                if (setter) {
+                    setter.call(obj, newVal);
+                } else {
+                    val = newVal;
+                }
+                childOb = !shallow && observe(newVal);
+                dep.notify();  //通知更新
+            }
+        });
+
+    }
+    function dependArray(value) {
+        for (var e = (void 0), i = 0, l = value.length; i < l; i++) {
+            e = value[i];
+            e && e.__ob__ && e.__ob__.dep.depend();
+            if (Array.isArray(e)) {
+                dependArray(e);
+            }
+        }
+    }
+    function protoAugment(target, src) {
+        target.__proto__ = src;
+    }
+    function copyAugment(target, src, keys) {
+        for (var i = 0; i < keys.length; i++) {
+            var key = keys[i];
+            def(target, key, src[key]);
+        }
+    }
 
     var strats = config.optionMergeStrategies;
     var defaultStrat = function (parentVal, childVal) {
@@ -194,29 +471,32 @@
     }
     function mergeData(to, from) {
         if (!from) { return to }
-        var key;
-        var keys = Object.keys(from);
+        var key, toVal, fromVal;
+        // const keys = Object.keys(from)
+        var keys = hasSymbol ? Reflect.ownKeys(from) : Object.keys(from);
+        
         for (var i = 0; i < keys.length; i++) {
             key = keys[i];
-            from[key];
-            to[key];
-            // if (!hasOwn(to,key)) {
-
-            // }
+            if (key === '__ob__') { continue }
+            toVal = to[key];
+            fromVal = from[key];
+            if (!hasOwn(to, key)) {
+                set(to, key, fromVal);
+            } else if (toVal !== fromVal && isPlainObject(toVal) && isPlainObject(fromVal)) {
+                mergeData(toVal, fromVal);
+            }
         }
+        return to
     }
-    strats.data = function (parentVal,
-        childVal,
-        vm) {
-
-        if (!vm) ; else if (parentVal || childVal) {
+    function mergeDataOrFn(parentVal, childVal, vm) {
+        if (!vm) ; else {
             return function mergedInstanceDataFn() {
                 var instanceData = typeof childVal === 'function'
-                    ? childVal.call(vm)
+                    ? childVal.call(vm, vm)
                     : childVal;
                 var defaultData = typeof parentVal === 'function'
-                    ? parentVal.call(vm)
-                    : undefined;
+                    ? parentVal.call(vm, vm)
+                    : parentVal;
                 if (instanceData) {
                     return mergeData(instanceData, defaultData)
                 } else {
@@ -224,6 +504,35 @@
                 }
             }
         }
+    }
+    strats.data = function (parentVal,
+        childVal,
+        vm) {
+
+        // if (!vm) {
+        //     return parentVal
+        // } else if (parentVal || childVal) {
+        //     return function mergedInstanceDataFn() {
+        //         const instanceData = typeof childVal === 'function'
+        //             ? childVal.call(vm)
+        //             : childVal
+        //         const defaultData = typeof parentVal === 'function'
+        //             ? parentVal.call(vm)
+        //             : undefined
+        //         if (instanceData) {
+        //             return mergeData(instanceData, defaultData)
+        //         } else {
+        //             return defaultData
+        //         }
+        //     }
+        // }
+        if (!vm) {
+            if (childVal && typeof childVal !== 'function') {
+                return parentVal
+            }
+            return mergeDataOrFn(parentVal, childVal)
+        }
+        return mergeDataOrFn(parentVal, childVal, vm)
     };
     function mergeOptions(parent,
         child,
@@ -253,262 +562,6 @@
             options[key] = strat(parent[key], child[key], vm, key);
         }
         return options
-    }
-
-    var uid$2 = 0;
-    var Dep = function Dep() {
-      this.id = uid$2++;
-      this.subs = [];
-    };
-    Dep.prototype.addSub = function addSub (sub) {
-      this.subs.push(sub);
-    };
-
-    Dep.prototype.removeSub = function removeSub (sub) {
-      remove$2(this.subs, sub);
-    };
-
-    Dep.prototype.depend = function depend () {
-      // 如果当前有全局的watcher，则相当于在收集依赖，把自身添加到watcher中去
-      if (Dep.target) {
-        Dep.target.addDep(this);
-      }
-    };
-
-    Dep.prototype.notify = function notify () {
-      // 内容有变动，通知更新
-      var subs = this.subs.slice();
-      for (var i = 0, l = subs.length; i < l; i++) {
-        subs[i].update();
-      }
-    };
-
-    Dep.target = null;  // 这里存放当前全局的watcher
-    var targetStack = []; //watcher的栈
-
-    function pushTarget(target) {
-      targetStack.push(target);
-      Dep.target = target;
-    }
-
-    function popTarget() {
-      targetStack.pop();
-      Dep.target = targetStack[targetStack.length - 1];
-    }
-
-    var arrayProto = Array.prototype;
-    var arrayMethods = Object.create(arrayProto);
-
-    // 几种对数组进行修改的方法，需要进行拓展，主动进行响应式的通知
-    var methodsToPatch = [
-        'push',
-        'pop',
-        'shift',
-        'unshift',
-        'splice',
-        'sort',
-        'reverse'
-    ];
-    // 这里不用es6箭头函数是因为this的指向问题,用箭头函数则this会指到window，而这里需要this指向当前的method
-    // 为什么这里用function时，内部this为foreach的当前项？因为foreach内部实现其实就是遍历然后调用传入的函数，method传入的是this[i]，相当于是当前的项
-    methodsToPatch.forEach(function (method) {
-        var original = arrayProto[method]; //获取到原生的方法
-        def(arrayMethods, method, function mutator() {
-            var args = [], len = arguments.length;
-            while ( len-- ) args[ len ] = arguments[ len ];
-
-            var result = original.apply(this, args); //先保有原生的方法逻辑，并调用一遍，在最后响应式逻辑执行完后返回。等同于切片重写
-            var ob = this.__ob__;
-            var inserted;
-            switch (method) {
-                case 'push':
-                case 'unshift':
-                    inserted = args;
-                    break;
-                case 'splice':
-                    inserted = args.slice(2);
-                    break;
-            }
-            if (inserted) { ob.observeArray(inserted); }
-            ob.dep.notify();
-            return result
-        });
-    });
-
-    var arrayKeys = Object.getOwnPropertyNames(arrayMethods);
-    var shouldObserve = true;  // 用于开启或关闭响应式数据的开关
-
-    function toggleObserving$1(value) {
-        shouldObserve = value;
-    }
-    var Observer = function Observer(value) {
-        this.value = value;
-        this.dep = new Dep();
-        this.vmCount = 0;
-        if (Array.isArray(value)) {
-            // 这里处理数组，数组的响应式不是对每一项进行响应式处理，而是改写数组的一些修改方法，例如push等，在操作结束后手动去通知更新
-            // 下面进行的判断是为了兼容某些环境下数组对象不继承object对象，这里有点疑问具体是哪些情况？有一种情况是通过object.create(null)创建的
-            // 但是这里又是写死的判断，感觉这里可以近似看做是true
-            if (hasProto) {
-                protoAugment(value, arrayMethods);
-            } else {
-                copyAugment(value, arrayMethods, arrayKeys);
-            }
-            this.observeArray(value);
-        } else {
-            // 对象类型直接walk遍历去做响应式代理
-            this.walk(value);
-        }
-    };
-    Observer.prototype.walk = function walk (obj) {
-        var keys = Object.keys(obj);
-        for (var i = 0; i < keys.length; i++) {
-            defineReactive$1(obj, keys[i]);
-        }
-    };
-    Observer.prototype.observeArray = function observeArray (items) {
-        for (var i = 0, l = items.length; i < l; i++) {
-            observe(items[i]);
-        }
-    };
-
-    function set(target, key, val) {
-        var ob = target.__ob__;
-        // 这里处理的是$set([],key,val)的情况，也就是直接操作数组的下标，这时候手动用splice进行更新
-        if (isArray(target) && isValidArrayIndex(key)) {
-            // 处理长度变长的情况 直接修改length  key比length短的情况下不影响，splice做替换
-            target.length = Math.max(target.length, key);
-            target.splice(key, 1, val);
-            // 这里直接返回，因为数组不做响应式处理，采用重写array的七个方法实现，而上面的splice已经是被重写过的
-            return val
-        }
-        if (hasOwn(target, key)) {
-            // 如果是对象，且在目标target上面已经存在，直接重新赋值然后返回，这里会触发target【key】的set方法，进入响应式
-            target[key] = val;
-            return val
-        }
-        // 这里考虑到vue实例被保存在数据中的情况，例如componentsis可以直接传入vue实例渲染出来，这种情况就不能监听，因为会重复
-        if (target._isVue || (ob && ob.vmCount)) {
-            return val
-        }
-        // 处理非响应式数据
-        if (!ob) {
-            target[key] = val;
-            return val
-        }
-        defineReactive$1();
-    }
-    function del(target, key) {
-        // 先判断目标是不是数组，key是不是数字
-        if (isArray(target) && typeof key === 'number') {
-            target.splice(key, 1); // 调用被重写的数组方法
-            return
-        }
-        var ob = target.__ob__;
-        if (target._isVue || (ob && ob.vmCount)) {
-            return
-        }
-        // 没有key这个对象
-        if (!hasOwn(target, key)) {
-            return
-        }
-        delete target[key];
-        if (!ob) {
-            // 对象没有观察者，不是响应式，则直接返回啥也不做
-            return
-        }
-        ob.dep.notify();
-    }
-    function observe(value, asRootData) {
-        if (!isObject(value) || value instanceof VNode) {
-            // 不是对象或vnode节点不观测，这里observe一般传入data
-            return
-        }
-        var ob;
-        if (hasOwn(value, '__ob__') && value.__ob__ instanceof Observer) {
-            // 如果已经被观测过，则直接拿来返回
-            ob = value.__ob__;
-        } else if (shouldObserve && !isServerRendering() && (Array.isArray(value) || isPlainObject(value)) && Object.isExtensible(value) && !value._isVue) {
-            // shouldObserve：这个变量控制着是否需要将变量转换为响应式数据。如果它的值为 false，则表示不需要将变量转换为响应式数据。当 Vue.js 初始化时，会根据用户传递的选项参数来决定 shouldObserve 的值。
-
-            // !isServerRendering()：这个方法用来判断当前代码是否在服务器端渲染的环境中执行，如果是，则不能将变量转换为响应式数据。
-
-            // (Array.isArray(value) || isPlainObject(value))：这个条件判断了变量的类型是否为数组或者纯对象，只有数组和纯对象才能被转换为响应式数据。
-
-            // Object.isExtensible(value)：这个方法用来检查对象是否可以添加新的属性。只有能够添加新属性的对象才能被转换为响应式数据。
-
-            // !value._isVue：这个条件判断了变量是否已经是 Vue 实例，如果是，则不需要再将它转换为响应式数据。
-            ob = new Observer(value); // 创建观察者
-        }
-        if (asRootData && ob) {
-            // 用来计数，表示ob被多少vue实例引用
-            ob.vmCount++;
-        }
-        return ob
-    }
-    function defineReactive$1(obj, key, val, customSetter, shallow) {
-        var dep = new Dep();  //dep可以理解为依赖管理器，每个属性都有，它保存依赖自身的watch，负责在更新时通知watch更新数据。
-        // 判断key是不是object内置的，并且判断是否可以设置
-        var property = Object.getOwnPropertyDescriptor(obj, key);
-        // property返回的是属性的描述器，由value,writable,get,set,configurable,enumerable组成
-        if (property && property.configurable === false) {
-            return
-        }
-        var getter = property && property.get;
-        var setter = property && property.set;
-        // 判断只有setter且只传入了两个参数 obj和key的情况，手动给val给值
-        if ((!getter || setter) && arguments.length === 2) {
-            val = obj[key];
-        }
-        var childOb = !shallow && observe(val); // 是否递归将子对象的属性也转为get set
-        // 下面就是耳熟能详的object.definedproperty
-        Object.defineProperty(obj, key, {
-            enumerable: true,
-            configurable: true,
-            get: function reactiveGetter() {
-                var value = getter ? getter.call(obj) : val;
-                // 如果目前有watcher在全局的target上，则收集依赖
-                if (Dep.target) {
-                    dep.depend();
-                    if (childOb) {
-                        // 有子对象，递归调用depend
-                        childOb.dep.depend();
-                        if (Array.isArray(value)) {
-                            dependArray(value);
-                        }
-                    }
-                }
-            },
-            set: function reactiveSetter(newVal) {
-                var value = getter ? getter.call(obj) : val;
-                // 下面的判断用于判断新值是否与旧值相等  第二个或的判断 自身与自身比较主要是为了判断NaN
-                if (newVal === value || (newVal !== newVal && value !== value)) {
-                    return
-                }
-                // 有getter没setter直接返回
-                if (getter && !setter) { return }
-                if (setter) {
-                    setter.call(obj, newVal);
-                } else {
-                    val = newVal;
-                }
-                childOb = !shallow && observe(newVal);
-                dep.notify();  //通知更新
-            }
-        });
-
-    }
-    function dependArray(value) {
-        for (var e = (void 0), i = 0, l = value.length; i < l; i++) {
-            e = value[i];
-            e && e.__ob__ && e.__ob__.dep.depend();
-            if (Array.isArray(e)) {
-                dependArray(e);
-            }
-        }
-    }
-    function protoAugment(target, src) {
-        target.__proto__ = src;
     }
 
     var functionTypeCheckRE = /^\s*function (\w+)/;
@@ -680,6 +733,23 @@
       vm._isBeingDestroyed = false;
 
     }
+
+    function callHook(vm, hook) {
+      // 同普通watcher一样，在执行时需要压入undefined进入Dep.target，防止添加多余的依赖
+      pushTarget();
+      var handlers = vm.$options[hook];
+      if (handlers) {
+        console.log(vm.test,'===============');
+        handlers.call(vm);
+        // for (let i = 0, j = handlers.length; i < j; i++) {
+        //   // invokeWithErrorHandling(handlers[i], vm, null, vm, info)
+        // }
+      }
+      if (vm._hasHookEvent) {
+        vm.$emit('hook' + hook);
+      }
+      popTarget();
+    }
     function lifecycleMixin(Vue) {
       // 这个方法就干了一件事，给原型上拓展更新dom的方法，也就是diff的入口
       Vue.prototype._update = function (vnode, hydrating) {
@@ -717,11 +787,12 @@
         if (vm._isBeingDestroyed) {
           return
         }
+        callHook(vm, 'beforeDestory');
         vm._isBeingDestroyed = true;
         var parent = vm.$parent;
-        if (parent&& !parent._isBeingDestroyed&& !vm.$options.abstract) {
+        if (parent && !parent._isBeingDestroyed && !vm.$options.abstract) {
           // 获取到父节点，如果父节点存在且没有在销毁进程中，子节点本身也不是抽象节点的情况下，从父节点的children list中移除，如果子节点是抽象节点，在这个list中根本不会被添加
-          remove(parent.$children,vm);
+          remove(parent.$children, vm);
         }
         if (vm._watcher) {
           // 清除vm的watcher
@@ -1011,7 +1082,7 @@
         } else {
             this.getter = parsePath(expOrFn);
             if (!this.getter) {
-                this.getter = noop;
+                this.getter = noop$1;
             }
         }
         // 缓存的情况下 只有通过计算方法才会返回新的value，否则就是undefined
@@ -1019,25 +1090,45 @@
             ? undefined
             : this.get();
     };
+    Watcher.prototype.addDep = function addDep (dep) {
+        var id = dep.id;
+        if (!this.newDepIds.has(id)) {
+            // 保存dep的id进字典，并且缓存dep，方便后续的操作
+            // 这里的两个dep字典之前说过了，用来对比更新前后依赖的dep是否有变化，因为可能由于v-if条件渲染不同的内容，不被显示的没必要添加依赖
+            this.newDepIds.add(id);
+            this.newDeps.push(dep);
+            if (!this.depIds.has(id)) {
+                // 这里就是有变化了  需要建立依赖
+                dep.addSub(this);
+            }
+        }
+    };
     Watcher.prototype.evaluate = function evaluate () {
         this.value = this.get();
         this.dirty = false;
+    };
+    Watcher.prototype.depend = function depend () {
+        var i = this.deps.length;
+        while (i--) {
+            this.deps[i].depend();
+            // dep.target.adddep(this) 实际上是用当前全局的watcher调用adddep方法，收集dep
+        }
     };
 
     var computedWatcherOptions = { lazy: true };
     var sharedPropertyDefinition = {
       enumerable: true,
       configurable: true,
-      get: noop,
-      set: noop
+      get: noop$1,
+      set: noop$1
     };
 
-    function proxy$1 (target, sourceKey, key) {
+    function proxy$1(target, sourceKey, key) {
       // 把key转换成描述器代理到target上，注意这里sourcekey为字符串，只能有一层例如a:{b:1,c:{d:2}},key只能代理bc不能d。再深的层级要在外部递归。
-      sharedPropertyDefinition.get = function proxyGetter () {
+      sharedPropertyDefinition.get = function proxyGetter() {
         return this[sourceKey][key]
       };
-      sharedPropertyDefinition.set = function proxySetter (val) {
+      sharedPropertyDefinition.set = function proxySetter(val) {
         this[sourceKey][key] = val;
       };
       Object.defineProperty(target, key, sharedPropertyDefinition);
@@ -1071,7 +1162,7 @@
       for (var key in propsOptions) {
         keys.push(key); // keys是options._propKeys的引用，所以相当于把key压入options
         var value = validateProp(key, propsOptions, propsData, vm);
-        defineReactive$1(props, key, value);
+        defineReactive(props, key, value);
         if (!(key in vm)) {
           // 如果vm上面没有，则把_prop代理到vm上面，也这是为什么在代码中可以直接this.访问到prop
           proxy$1(vm, '_props', key);
@@ -1082,11 +1173,12 @@
     function initMethods(vm, methods) {
       // methods的处理逻辑很简单，通过bind改变this即可，然后挂载到vm上面
       for (var key in methods) {
-        vm[key] = typeof methods[key] !== 'function' ? noop : bind(methods[key], vm);
+        vm[key] = typeof methods[key] !== 'function' ? noop$1 : bind(methods[key], vm);
       }
     }
     function initData(vm) {
       var data = vm.$options.data;
+      console.log(vm,'------------datadata-');
       data = vm._data = typeof data === 'function' ? getData(data, vm) : data || {};
       if (!isPlainObject(data)) {
         data = {};
@@ -1110,13 +1202,13 @@
     function initComputed$1(vm, computed) {
       // 在vm上创建一个watcher数组用于保存计算属性的watcher
       var watchers = vm._computedWatchers = Object.create(null);
-      var isSSR = isServerRendering$1();
+      var isSSR = isServerRendering();
       for (var key in computed) {
         var userDef = computed[key];
         //获取用户定义的计算属性，有两种方式，一种是a (return) 一种是以get和set方式写的是个对象
         var getter = typeof userDef === 'function' ? userDef : userDef.get;
         if (!isSSR) {
-          watchers[key] = new Watcher(vm, getter || noop, noop, computedWatcherOptions);  //一个组件会有一套watcher，也就是那3中：渲染，计算，普通watcher,主要做了：1.让dep添加自己，自己也添加dep，2.数据更新
+          watchers[key] = new Watcher(vm, getter || noop$1, noop$1, computedWatcherOptions);  //一个组件会有一套watcher，也就是那3中：渲染，计算，普通watcher,主要做了：1.让dep添加自己，自己也添加dep，2.数据更新
         }
         if (!(key in vm)) {
           defineComputed$1(vm, key, userDef); //处理计算属性，详细见下方
@@ -1164,14 +1256,14 @@
     // 计算属性因为存在缓存，所以要做处理
     function defineComputed$1(target, key, userDef) {
       // 判断运行在什么平台上，服务端的话就不给缓存了，直接调用用错误处理工厂函数包装之后的用户定义的userDef
-      var shouldCache = !isServerRendering$1();
+      var shouldCache = !isServerRendering();
       if (typeof userDef === 'function') {
         sharedPropertyDefinition.get = shouldCache ? createComputedGetter(key) : createGetterInvoker(userDef);
-        sharedPropertyDefinition.set = noop;
+        sharedPropertyDefinition.set = noop$1;
       } else {
         // 用get和set方式定义的computed  先判断是否给了get然后走到跟上面一样的判断逻辑中
-        sharedPropertyDefinition.get = userDef.get ? shouldCache && userDef.cache !== false ? createComputedGetter(key) : createGetterInvoker(userDef.get) : noop;
-        sharedPropertyDefinition.set = userDef.set || noop;
+        sharedPropertyDefinition.get = userDef.get ? shouldCache && userDef.cache !== false ? createComputedGetter(key) : createGetterInvoker(userDef.get) : noop$1;
+        sharedPropertyDefinition.set = userDef.set || noop$1;
       }
       Object.defineProperty(target, key, sharedPropertyDefinition);
     }
@@ -1239,7 +1331,6 @@
             // 这一步标记自身是vue实例，避免后续监听整个vue实例
             vm._isVue = true;
             vm._uid = uid++;
-            console.log(options,'-------');
             if (options && options._isComponent) {
                 initInternalComponent();
             } else {
@@ -1252,8 +1343,15 @@
             initLifecycle(vm); // 初始化一些后续会用到的对象 例如parent,root _watcher等
             initEvents(vm); // 初始化事件系统 v-on 这里就指的是在父组件中引入了子组件 在其上面可以v-on或者@click等方式监听到事件，而子组件在编译的时候解析到标签时，会获取父组件在自己上面注册的事件并保留在vm.$options._parentListeners​​中
             initRender(vm); // 进行插槽的处理，创建组件两种方法的挂载，attrs和listeners的处理
+            callHook(vm, 'beforeCreate'); //生命周期走到这里 创建了组件实例，进行了一些初始方法的挂载，获取到后续所需要的数据，例如事件，插槽等。
             // initInjections(vm) // 待完善
             initState(vm);
+            // initProvide(vm) // resolve provide after data/props
+            callHook(vm, 'created');
+
+            if (vm.$options.el) {
+                vm.$mount(vm.$options.el);
+            }
         };
     }
     // resolveConstructorOptions用来返回类构造函数上面的最新的options
@@ -1289,7 +1387,7 @@
         }
         return options
     }
-    function initInternalComponent(vm,options){
+    function initInternalComponent(vm, options) {
         console.log('in component');
     }
 
@@ -1565,6 +1663,19 @@
     }
 
     initGlobalAPI(Vue);
+
+    function createPatchFunction() { }
+
+    var patch = createPatchFunction();
+
+    // 根据不同的平台挂载不同的方法，web环境挂载这些，其实内部是v-model v-show transtion
+    // extend(Vue.options.directives, platformDirectives)
+    // extend(Vue.options.components, platformComponents)
+    Vue.prototype.__patch__ = inBrowser ? patch : noop;
+
+    Vue.prototype.$mount = function (el,hydrating) {
+        console.log('1111111111');
+    };
 
     return Vue;
 

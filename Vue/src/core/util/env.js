@@ -2,6 +2,9 @@ export const inBrowser = typeof window !== 'undefined'
 export const inWeex = typeof WXEnvironment !== 'undefined' && !!WXEnvironment.platform
 export const nativeWatch = ({}).watch
 export const hasProto = '__proto__' in {}
+export const hasSymbol =
+  typeof Symbol !== 'undefined' && isNative(Symbol) &&
+  typeof Reflect !== 'undefined' && isNative(Reflect.ownKeys)
 let _Set
 let _isServer
 export function isNative(Ctor) {

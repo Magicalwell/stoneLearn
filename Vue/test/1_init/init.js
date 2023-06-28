@@ -3,8 +3,11 @@ var demo = new Vue({
     data: function () {
         return {
             textRender: 'false',
-            test:123,
-            ttthlll:'qqqqq'
+            test: 123,
+            ttthlll: 'qqqqq'
         }
     },
+    created() {
+        console.log(this.test,'????????');
+    }
 })

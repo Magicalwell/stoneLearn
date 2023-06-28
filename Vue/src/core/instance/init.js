@@ -10,7 +10,6 @@ export function initMixin(Vue) {
         // 这一步标记自身是vue实例，避免后续监听整个vue实例
         vm._isVue = true
         vm._uid = uid++
-        console.log(options,'-------');
         if (options && options._isComponent) {
             initInternalComponent(vm, options)
         } else {
@@ -28,6 +27,10 @@ export function initMixin(Vue) {
         initState(vm)
         // initProvide(vm) // resolve provide after data/props
         callHook(vm, 'created')
+
+        if (vm.$options.el) {
+            vm.$mount(vm.$options.el)
+        }
     }
 }
 // resolveConstructorOptions用来返回类构造函数上面的最新的options
@@ -63,6 +66,6 @@ export function resolveConstructorOptions(Ctor) {
     }
     return options
 }
-export function initInternalComponent(vm,options){
+export function initInternalComponent(vm, options) {
     console.log('in component');
 }

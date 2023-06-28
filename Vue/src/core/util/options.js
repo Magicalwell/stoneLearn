@@ -1,5 +1,7 @@
 import { hasOwn, camelize, isPlainObject, extend } from 'shared/util'
 import config from '../config'
+import { hasSymbol } from './env'
+import { set } from '../observer/index'
 const strats = config.optionMergeStrategies
 const defaultStrat = function (parentVal, childVal) {
     return childVal === undefined
@@ -63,30 +65,33 @@ function normalizeDirectives(options) {
 function mergeData(to, from) {
     if (!from) return to
     let key, toVal, fromVal
-    const keys = Object.keys(from)
+    // const keys = Object.keys(from)
+    const keys = hasSymbol ? Reflect.ownKeys(from) : Object.keys(from)
+    
     for (let i = 0; i < keys.length; i++) {
         key = keys[i]
-        fromVal = from[key]
+        if (key === '__ob__') continue
         toVal = to[key]
-        // if (!hasOwn(to,key)) {
-
-        // }
+        fromVal = from[key]
+        if (!hasOwn(to, key)) {
+            set(to, key, fromVal)
+        } else if (toVal !== fromVal && isPlainObject(toVal) && isPlainObject(fromVal)) {
+            mergeData(toVal, fromVal)
+        }
     }
+    return to
 }
-strats.data = function (parentVal,
-    childVal,
-    vm) {
-
+export function mergeDataOrFn(parentVal, childVal, vm) {
     if (!vm) {
 
-    } else if (parentVal || childVal) {
+    } else {
         return function mergedInstanceDataFn() {
             const instanceData = typeof childVal === 'function'
-                ? childVal.call(vm)
+                ? childVal.call(vm, vm)
                 : childVal
             const defaultData = typeof parentVal === 'function'
-                ? parentVal.call(vm)
-                : undefined
+                ? parentVal.call(vm, vm)
+                : parentVal
             if (instanceData) {
                 return mergeData(instanceData, defaultData)
             } else {
@@ -94,6 +99,35 @@ strats.data = function (parentVal,
             }
         }
     }
+}
+strats.data = function (parentVal,
+    childVal,
+    vm) {
+
+    // if (!vm) {
+    //     return parentVal
+    // } else if (parentVal || childVal) {
+    //     return function mergedInstanceDataFn() {
+    //         const instanceData = typeof childVal === 'function'
+    //             ? childVal.call(vm)
+    //             : childVal
+    //         const defaultData = typeof parentVal === 'function'
+    //             ? parentVal.call(vm)
+    //             : undefined
+    //         if (instanceData) {
+    //             return mergeData(instanceData, defaultData)
+    //         } else {
+    //             return defaultData
+    //         }
+    //     }
+    // }
+    if (!vm) {
+        if (childVal && typeof childVal !== 'function') {
+            return parentVal
+        }
+        return mergeDataOrFn(parentVal, childVal)
+    }
+    return mergeDataOrFn(parentVal, childVal, vm)
 }
 export function mergeOptions(parent,
     child,

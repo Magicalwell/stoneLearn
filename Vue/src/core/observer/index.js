@@ -1,5 +1,6 @@
 import Dep from './dep'
-import { isArray, isValidArrayIndex, hasOwn, isObject, isPlainObject, hasProto } from '../util/index'
+import VNode from '../vdom/vnode'
+import { isArray, isValidArrayIndex, hasOwn, isObject, isPlainObject, hasProto, def, isServerRendering } from '../util/index'
 import { arrayMethods } from './array'
 
 const arrayKeys = Object.getOwnPropertyNames(arrayMethods)
@@ -13,6 +14,7 @@ export class Observer {
         this.value = value
         this.dep = new Dep()
         this.vmCount = 0
+        def(value, '__ob__', this) //把自己挂载value上的__ob__中去
         if (Array.isArray(value)) {
             // 这里处理数组，数组的响应式不是对每一项进行响应式处理，而是改写数组的一些修改方法，例如push等，在操作结束后手动去通知更新
             // 下面进行的判断是为了兼容某些环境下数组对象不继承object对象，这里有点疑问具体是哪些情况？有一种情况是通过object.create(null)创建的
@@ -65,7 +67,10 @@ export function set(target, key, val) {
         target[key] = val
         return val
     }
-    defineReactive()
+    // 逻辑走到这里就是正常的给一个对象中新增一个key，然后通知依赖了这个对象的watcher更新
+    defineReactive(ob.value, key, val)
+    ob.dep.notify()
+    return val
 }
 export function del(target, key) {
     // 先判断目标是不是数组，key是不是数字
@@ -147,6 +152,7 @@ export function defineReactive(obj, key, val, customSetter, shallow) {
                     }
                 }
             }
+            return value
         },
         set: function reactiveSetter(newVal) {
             const value = getter ? getter.call(obj) : val
@@ -178,4 +184,10 @@ function dependArray(value) {
 }
 function protoAugment(target, src) {
     target.__proto__ = src
+}
+function copyAugment(target, src, keys) {
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i]
+        def(target, key, src[key])
+    }
 }
