@@ -17,8 +17,9 @@ const resolve = p => {
 // builds保存不同环境的rollup配置设置，通过--environment TARGET:full-dev
 const builds = {
     // Runtime+compiler development build (Browser)
-    'full-dev': {
-        entry: resolve('web/entry-runtime.js'),
+    'web-full-dev': {
+        // entry: resolve('web/entry-runtime.js'),
+        entry: resolve('web/entry-runtime-with-compiler.js'),
         dest: resolve('dist/bundle.cjs.js'),
         format: 'umd',
         env: 'development',

@@ -7,7 +7,7 @@
     "test": "test"
   },
   "scripts": {
-    "dev": "rollup -w -c scripts/config.js --environment TARGET:full-dev"
+    "dev": "rollup -w -c scripts/config.js --environment TARGET:web-full-dev"
   },
   "keywords": [],
   "author": "",

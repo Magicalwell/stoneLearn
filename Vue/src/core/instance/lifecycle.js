@@ -1,4 +1,5 @@
 import { popTarget, pushTarget } from "../observer/dep"
+import { createEmptyVNode } from '../vdom/vnode'
 // import { invokeWithErrorHandling } from "../util"
 
 export let activeInstance = null
@@ -40,7 +41,7 @@ export function callHook(vm, hook) {
   const handlers = vm.$options[hook]
   const info = ''
   if (handlers) {
-    console.log(vm.test,'===============');
+    console.log(vm.test, '===============');
     handlers.call(vm)
     // for (let i = 0, j = handlers.length; i < j; i++) {
     //   // invokeWithErrorHandling(handlers[i], vm, null, vm, info)
@@ -112,4 +113,12 @@ export function lifecycleMixin(Vue) {
     vm._isDestroyed = true
     vm.__patch__(vm._vnode)
   }
+}
+export function mountComponent(vm, el, hydrating) {
+  vm.$el = el
+  if (!vm.$options.render) {
+    vm.$options.render = createEmptyVNode
+  }
+  // 由源代码可知，created到beforeMount之间，经历了绑定挂载的el真实dom，如果没有render函数，则默认给一个
+  callHook(vm, 'beforeMount')
 }

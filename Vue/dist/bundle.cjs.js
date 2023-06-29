@@ -182,6 +182,14 @@
     }
 
     var VNode$1 = function VNode () {};
+    var createEmptyVNode$1 = function (text) {
+        if ( text === void 0 ) text = '';
+
+        var node = new VNode$1();
+        node.text = text;
+        node.isComment = true;
+        return node
+    };
 
     var arrayProto = Array.prototype;
     var arrayMethods = Object.create(arrayProto);
@@ -739,7 +747,7 @@
       pushTarget();
       var handlers = vm.$options[hook];
       if (handlers) {
-        console.log(vm.test,'===============');
+        console.log(vm.test, '===============');
         handlers.call(vm);
         // for (let i = 0, j = handlers.length; i < j; i++) {
         //   // invokeWithErrorHandling(handlers[i], vm, null, vm, info)
@@ -808,6 +816,14 @@
         vm._isDestroyed = true;
         vm.__patch__(vm._vnode);
       };
+    }
+    function mountComponent(vm, el, hydrating) {
+      vm.$el = el;
+      if (!vm.$options.render) {
+        vm.$options.render = createEmptyVNode$1;
+      }
+      // 由源代码可知，created到beforeMount之间，经历了绑定挂载的el真实dom，如果没有render函数，则默认给一个
+      callHook(vm, 'beforeMount');
     }
 
     // updateListeners(listeners, oldListeners || {}, add, remove, createOnceHandler, vm)
@@ -1668,14 +1684,155 @@
 
     var patch = createPatchFunction();
 
+    function query(el) {
+        if (typeof el === 'string') {
+            var selected = document.querySelector(el);
+            if (!selected) {
+                warn(
+                    'Cannot find element: ' + el
+                );
+                return document.createElement('div')
+            }
+            return selected
+        } else {
+            return el
+        }
+    }
+
     // 根据不同的平台挂载不同的方法，web环境挂载这些，其实内部是v-model v-show transtion
     // extend(Vue.options.directives, platformDirectives)
     // extend(Vue.options.components, platformComponents)
     Vue.prototype.__patch__ = inBrowser ? patch : noop;
 
-    Vue.prototype.$mount = function (el,hydrating) {
+    Vue.prototype.$mount = function (el, hydrating) {
         console.log('1111111111');
+        el = el && inBrowser ? query(el) : undefined;
+        return mountComponent(this, el)
     };
+
+    var baseOptions = {
+        expectHTML: true,
+        // modules,
+        // directives,
+        // isPreTag,
+        // isUnaryTag,
+        // mustUseProp,
+        // canBeLeftOpenTag,
+        // isReservedTag,
+        // getTagNamespace,
+        // staticKeys: genStaticKeys(modules)
+    };
+
+    function createCompileToFunctionFn(compile) {
+        var cache = Object.create(null);
+        return function compileToFunctions(template, options, vm) {
+            console.log(template, options, vm, 'template, options, vm');
+            //delimiters为插值的分隔符，这里直接把字符串缓存到cache里面
+            var key = options.delimiters
+                ? String(options.delimiters) + template
+                : template;
+            if (cache[key]) {
+                return cache[key]
+            }
+            compile(template, options);
+            var res = {};
+            res.render = function () { };
+            res.staticRenderFns = function () { };
+            return (cache[key] = res)
+        }
+    }
+
+    function createCompilerCreator(baseCompile) {
+        return function createCompiler(baseOptions) {
+            function compile(template, options) {
+                var compiled = baseCompile(template.trim());
+                return compiled
+            }
+            return {
+                compile: compile,
+                compileToFunctions: createCompileToFunctionFn(compile)
+            }
+        }
+    }
+
+    var createCompiler = createCompilerCreator(function baseCompile(
+        template,
+        options
+    ) {
+        var ast = parse(template.trim(), options);
+        if (options.optimize !== false) {
+            optimize(ast, options);
+        }
+        var code = generate(ast, options);
+        return {
+            ast: ast,
+            render: code.render,
+            staticRenderFns: code.staticRenderFns
+        }
+    });
+
+    var ref = createCompiler(baseOptions);
+    var compileToFunctions = ref.compileToFunctions;
+
+    var idToTemplate = cached(function (id) {
+        var el = query(id);
+        return el && el.innerHTML
+    });
+
+    // 下面的mount保存的是Vue构造函数上面提供的mount，就是调用了mountComponent
+    var mount = Vue.prototype.$mount;
+    console.log(mount, '+++++++++++');
+    Vue.prototype.$mount = function (el, hydrating) {
+        el = el && query(el);
+        if (el === document.body || el === document.documentElement) {
+            return this
+        }
+        var options = this.$options;
+        if (!options.render) {
+            // 没有给render的情况下，判断有没有template，render优先级高一些
+            var template = options.template;
+            // 这里第一个template的判断逻辑可以看作是提前处理template
+            if (template) {
+                if (typeof template === 'string') {
+                    if (template.charAt(0) === '#') {
+                        //兼容模板是#app这种选择器的情况
+                        template = idToTemplate(template);
+                    }
+                } else if (template.nodeType) {
+                    template = template.innerHTML;
+                } else {
+                    return this
+                }
+            } else if (el) {
+                template = getOuterHTML(el);
+            }
+            if (template) {
+                // compileToFunctions方法接受模板和配置参数，返回render，具体看实现
+                var ref = compileToFunctions(template, {
+                    outputSourceRange: "development" !== 'production',
+                    shouldDecodeNewlines: true,
+                    shouldDecodeNewlinesForHref: true,
+                    delimiters: undefined,
+                    comments: undefined
+                }, this);
+                var render = ref.render;
+                var staticRenderFns = ref.staticRenderFns;
+                options.render = render;
+                options.staticRenderFns = staticRenderFns;
+            }
+        }
+        return mount.call(this, el, hydrating)
+    };
+    function getOuterHTML(el) {
+        if (el.outerHTML) {
+            return el.outerHTML
+        } else {
+            var container = document.createElement('div');
+            container.appendChild(el.cloneNode(true));
+            return container.innerHTML
+        }
+    }
+    Vue.compile = compileToFunctions;
 
     return Vue;
 

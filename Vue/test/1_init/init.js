@@ -9,5 +9,12 @@ var demo = new Vue({
     },
     created() {
         console.log(this.test,'????????');
-    }
+    },
+    template: `
+    <input
+      type="text"
+      v-bind:value="test"
+      v-on:input="$emit('input', $event.target.value)"
+    >
+  `
 })
