@@ -6,6 +6,7 @@ export function isReserved(str) {
 }
 
 const bailRE = new RegExp(`[^${unicodeRegExp.source}.$_\\d]`)
+// 解析路径返回对应的对象  从对象中根据路径提取数据
 export function parsePath(path) {
   if (bailRE.test(path)) {
     return
@@ -19,6 +20,7 @@ export function parsePath(path) {
     return obj
   }
 }
+// 代理方法，把某个key代理到对应的对象上
 export function def(obj, key, val, enumerable) {
   Object.defineProperty(obj, key, {
     value: val,

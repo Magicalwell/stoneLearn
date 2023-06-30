@@ -77,6 +77,20 @@
         }
     }
 
+    function makeMap(
+        str,
+        expectsLowerCase
+    ) {
+        var map = Object.create(null);
+        var list = str.split(',');
+        for (var i = 0; i < list.length; i++) {
+            map[list[i]] = true;
+        }
+        return expectsLowerCase
+            ? function (val) { return map[val.toLowerCase()]; }
+            : function (val) { return map[val]; }
+    }
+
     var unicodeRegExp = /a-zA-Z\u00B7\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u037D\u037F-\u1FFF\u200C-\u200D\u203F-\u2040\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD/;
 
     function isReserved(str) {
@@ -85,6 +99,7 @@
     }
 
     var bailRE = new RegExp(("[^" + (unicodeRegExp.source) + ".$_\\d]"));
+    // 解析路径返回对应的对象  从对象中根据路径提取数据
     function parsePath(path) {
       if (bailRE.test(path)) {
         return
@@ -98,6 +113,7 @@
         return obj
       }
     }
+    // 代理方法，把某个key代理到对应的对象上
     function def(obj, key, val, enumerable) {
       Object.defineProperty(obj, key, {
         value: val,
@@ -1723,6 +1739,15 @@
         // staticKeys: genStaticKeys(modules)
     };
 
+    function createFunction (code, errors) {
+        try {
+          return new Function(code)
+        } catch (err) {
+          errors.push({ err: err, code: code });
+          return noop
+        }
+      }
+      
     function createCompileToFunctionFn(compile) {
         var cache = Object.create(null);
         return function compileToFunctions(template, options, vm) {
@@ -1734,9 +1759,10 @@
             if (cache[key]) {
                 return cache[key]
             }
-            compile(template, options);
+            var compiled = compile(template, options);
             var res = {};
-            res.render = function () { };
+            var fnGenErrors = [];
+            res.render = createFunction(compiled.render,fnGenErrors);
             res.staticRenderFns = function () { };
             return (cache[key] = res)
         }
@@ -1745,7 +1771,14 @@
     function createCompilerCreator(baseCompile) {
         return function createCompiler(baseOptions) {
             function compile(template, options) {
-                var compiled = baseCompile(template.trim());
+                var finalOptions = Object.create(baseOptions);
+
+                for (var key in options) {
+                    if (key !== 'modules' && key !== 'directives') {
+                        finalOptions[key] = options[key];
+                    }
+                }
+                var compiled = baseCompile(template.trim(), finalOptions);
                 return compiled
             }
             return {
@@ -1755,10 +1788,133 @@
         }
     }
 
+    makeMap('script,style,textarea', true);
+
+    var comment = /^<!\--/;
+    var conditionalComment = /^<!\[/;
+    var ncname = "[a-zA-Z_][\\-\\.0-9_a-zA-Z" + (unicodeRegExp.source) + "]*";
+    var qnameCapture = "((?:" + ncname + "\\:)?" + ncname + ")";
+    var doctype = /^<!DOCTYPE [^>]+>/i;
+    var endTag = new RegExp(("^<\\/" + qnameCapture + "[^>]*>"));
+    var startTagOpen = new RegExp(("^<" + qnameCapture));
+
+
+    var isIgnoreNewlineTag = makeMap('pre,textarea', true);
+    var shouldIgnoreFirstNewline = function (tag, html) { return tag && isIgnoreNewlineTag(tag) && html[0] === '\n'; };
+
+    function parseHTML(html, options) {
+        var index = 0;
+        while (html) {
+            // 针对一些特殊的元素标签做处理
+            {
+                var textEnd = html.indexOf('<'); // 判断html是不是由<开始，这里可能还有注释
+                if (textEnd === 0) {
+                    if (comment.test(html)) {
+                        // 这里判断开头是<--的注释的情况下，找到注释的结尾
+                        var commentEnd = html.indexOf('-->');
+                        if (commentEnd >= 0) {
+                            if (options.shouldKeepComment) ;
+                            advance(commentEnd + 3);
+                            continue
+                        }
+                    }
+                    // 条件注释，实际中没遇到过
+                    if (conditionalComment.test(html)) {
+                        var conditionalEnd = html.indexOf(']>');
+
+                        if (conditionalEnd >= 0) {
+                            advance(conditionalEnd + 2);
+                            continue
+                        }
+                    }
+                    // 程序运行到这里  下一个html就不会是注释了  但是还有其他特殊的字段需要判断
+                    // doctype
+                    var doctypeMatch = html.match(doctype);
+                    if (doctypeMatch) {
+                        advance(doctypeMatch[0].length);
+                        continue
+                    }
+                    // 先检测结束标签
+                    // 这里检测标签的原理是匹配合法的标签
+                    var endTagMatch = html.match(endTag);
+                    if (endTagMatch) {
+                        console.log(endTagMatch, 'endTagendTagendTag');
+                        var curIndex = index;
+                        advance(endTagMatch[0].length);
+                        parseEndTag(endTagMatch[1], curIndex, index);
+                        continue
+                    }
+
+                    var startTagMatch = parseStartTag();
+                    if (startTagMatch) {
+                        handleStartTag(startTagMatch);
+                        if (shouldIgnoreFirstNewline(startTagMatch.tagName, html)) {
+                            advance(1);
+                        }
+                        continue
+                    }
+                }
+                var text = (void 0), rest = (void 0), next = (void 0);
+                if (textEnd >= 0) {
+                    // 处理文本
+                    rest = html.slice(textEnd);
+                    while (
+                        !endTag.test(rest) &&
+                        !startTagOpen.test(rest) &&
+                        !comment.test(rest) &&
+                        !conditionalComment.test(rest)
+                    ) {
+                        // < in plain text, be forgiving and treat it as text
+                        next = rest.indexOf('<', 1);
+                        if (next < 0) { break }
+                        textEnd += next;
+                        rest = html.slice(textEnd);
+                    }
+                    text = html.substring(0, textEnd);
+                }
+                if (textEnd < 0) {
+                    text = html;
+                }
+                if (text) {
+                    advance(text.length);
+                }
+            }
+        }
+        function parseStartTag() {
+            var start = html.match(startTagOpen);
+            if (start) {
+                // const match = 
+                console.log(start, '=========');
+            }
+            return
+        }
+        // advance直接截取剩下的html
+        function advance(n) {
+            index += n;
+            html = html.substring(n);
+        }
+    }
+
+    function parse(template, options) {
+        // warn = options.warn || baseWarn
+        var root;
+        parseHTML(template, {
+            expectHTML: options.expectHTML,
+            isUnaryTag: options.isUnaryTag,
+            canBeLeftOpenTag: options.canBeLeftOpenTag,
+            shouldDecodeNewlines: options.shouldDecodeNewlines,
+            shouldDecodeNewlinesForHref: options.shouldDecodeNewlinesForHref,
+            shouldKeepComment: options.comments,
+            outputSourceRange: options.outputSourceRange,
+        });
+        return root
+    }
+
     var createCompiler = createCompilerCreator(function baseCompile(
         template,
         options
     ) {
+        console.log(template,options,'----------ddd-------');
         var ast = parse(template.trim(), options);
         if (options.optimize !== false) {
             optimize(ast, options);
