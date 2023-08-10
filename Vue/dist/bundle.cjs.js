@@ -1788,8 +1788,10 @@
         }
     }
 
-    makeMap('script,style,textarea', true);
+    var isPlainTextElement = makeMap('script,style,textarea', true);
 
+    var attribute = /^\s*([^\s"'<>\/=]+)(?:\s*(=)\s*(?:"([^"]*)"+|'([^']*)'+|([^\s"'=<>`]+)))?/;
+    var dynamicArgAttribute = /^\s*((?:v-[\w-]+:|@|:|#)\[[^=]+?\][^\s"'<>\/=]*)(?:\s*(=)\s*(?:"([^"]*)"+|'([^']*)'+|([^\s"'=<>`]+)))?/;
     var comment = /^<!\--/;
     var conditionalComment = /^<!\[/;
     var ncname = "[a-zA-Z_][\\-\\.0-9_a-zA-Z" + (unicodeRegExp.source) + "]*";
@@ -1797,16 +1799,40 @@
     var doctype = /^<!DOCTYPE [^>]+>/i;
     var endTag = new RegExp(("^<\\/" + qnameCapture + "[^>]*>"));
     var startTagOpen = new RegExp(("^<" + qnameCapture));
+    var startTagClose = /^\s*(\/?)>/;
 
+    var encodedAttr = /&(?:lt|gt|quot|amp|#39);/g;
+    var encodedAttrWithNewLines = /&(?:lt|gt|quot|amp|#39|#10|#9);/g;
+
+    var decodingMap = {
+        '&lt;': '<',
+        '&gt;': '>',
+        '&quot;': '"',
+        '&amp;': '&',
+        '&#10;': '\n',
+        '&#9;': '\t',
+        '&#39;': "'"
+    };
 
     var isIgnoreNewlineTag = makeMap('pre,textarea', true);
     var shouldIgnoreFirstNewline = function (tag, html) { return tag && isIgnoreNewlineTag(tag) && html[0] === '\n'; };
 
+    function decodeAttr(value, shouldDecodeNewlines) {
+        var re = shouldDecodeNewlines ? encodedAttrWithNewLines : encodedAttr;
+        return value.replace(re, function (match) { return decodingMap[match]; })
+    }
+
     function parseHTML(html, options) {
+        var stack = [];
+        var expectHTML = options.expectHTML;
+        var isUnaryTag = options.isUnaryTag || (function () { return false; });
         var index = 0;
+        var lastTag;
         while (html) {
             // 针对一些特殊的元素标签做处理
-            {
+            // lastTag 是一个变量，用于存储上一个解析的开始标签名。这个变量在解析过程中会被更新为当前解析的开始标签名
+            // 它主要用来判断当前解析的光标是不是在一个标签的开始标签内部
+            if (!lastTag || !isPlainTextElement(lastTag)) {
                 var textEnd = html.indexOf('<'); // 判断html是不是由<开始，这里可能还有注释
                 if (textEnd === 0) {
                     if (comment.test(html)) {
@@ -1834,7 +1860,7 @@
                         advance(doctypeMatch[0].length);
                         continue
                     }
-                    // 先检测结束标签
+                    // 先检测结束标签 这里是为了处理嵌套结构下标签闭合的问题 如果先检测开始标签，那么可能存在无法判断结束标签是属于哪个开始标签
                     // 这里检测标签的原理是匹配合法的标签
                     var endTagMatch = html.match(endTag);
                     if (endTagMatch) {
@@ -1847,6 +1873,7 @@
 
                     var startTagMatch = parseStartTag();
                     if (startTagMatch) {
+                        // 对匹配的开始标签进行处理，因为属性和操作符都在开始标签的括号中，所以这里要比结束标签多一个处理解析的过程
                         handleStartTag(startTagMatch);
                         if (shouldIgnoreFirstNewline(startTagMatch.tagName, html)) {
                             advance(1);
@@ -1879,14 +1906,65 @@
                     advance(text.length);
                 }
             }
+            advance(1);
         }
         function parseStartTag() {
             var start = html.match(startTagOpen);
             if (start) {
-                // const match = 
-                console.log(start, '=========');
+                var match = {
+                    tagName: start[1],
+                    attrs: [],
+                    start: index
+                };
+                advance(start[0].length);
+                var end, attr;
+                // 这里匹配到开始标签后  advance进入到标签内  先判断是不是单个标签也就是 <test /> 这种写法，然后匹配属性 v-xxx等
+                while (!(end = html.match(startTagClose)) && (attr = html.match(dynamicArgAttribute) || html.match(attribute))) {
+                    attr.start = index; // 记录属性的起始点
+                    advance(attr[0].length);  //计算属性的长度并更新index
+                    attr.end = index;  // 记录属性的结束点
+                    match.attrs.push(attr);
+                }
+                if (end) {
+                    match.unarySlash = end[1];
+                    advance(end[0].length);
+                    match.end = index;
+                    return match
+                }
             }
-            return
+        }
+        function handleStartTag(match) {
+            var tagName = match.tagName;
+            var unarySlash = match.unarySlash;
+            console.log(match, '>>>>>>>>');
+            if (expectHTML) {
+                console.log('11111111');
+            }
+            var unary = isUnaryTag(tagName) || !!unarySlash;  //自闭合标签的判断
+            var l = match.attrs.length;
+            var attrs = new Array(l);
+            // match中的数据类似这样：[' v-model="test"', 'v-model', '=', 'test', undefined, undefined, index: 0]
+            for (var i = 0; i < l; i++) {
+                var args = match.attrs[i];
+                // args的第二项是属性标签名 第四项是值
+                var value = args[3] || args[4] || args[5] || '';
+                var shouldDecodeNewlines = tagName === 'a' && args[1] === 'href'
+                    ? options.shouldDecodeNewlinesForHref
+                    : options.shouldDecodeNewlines;
+                attrs[i] = {
+                    name: args[1],
+                    value: decodeAttr(value, shouldDecodeNewlines)
+                };
+            }
+            console.log(attrs,'attrsattrs');
+            if (!unary) {
+                stack.push({ tag: tagName, lowerCasedTag: tagName.toLowerCase(), attrs: attrs, start: match.start, end: match.end });
+                lastTag = tagName;  // 更新lastTag
+              }
+          
+              if (options.start) {
+                options.start(tagName, attrs, unary, match.start, match.end);
+              }
         }
         // advance直接截取剩下的html
         function advance(n) {

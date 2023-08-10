@@ -18,6 +18,6 @@ var demo = new Vue({
   //   >
   // `
   template: `
-  <div>123</div>
+  <div v-model="test" :mode="textRender">123</div>
 `
 })
