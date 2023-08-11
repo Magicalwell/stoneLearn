@@ -106,7 +106,6 @@ export function parseHTML(html, options) {
                     !comment.test(rest) &&
                     !conditionalComment.test(rest)
                 ) {
-                    // < in plain text, be forgiving and treat it as text
                     next = rest.indexOf('<', 1)
                     if (next < 0) break
                     textEnd += next
@@ -120,11 +119,40 @@ export function parseHTML(html, options) {
             if (text) {
                 advance(text.length)
             }
-        } else {
 
+            if (options.chars && text) {
+                options.chars(text, index - text.length, index)
+            }
+        } else {
+            let endTagLength = 0
+            const stackedTag = lastTag.toLowerCase()
+            const reStackedTag = reCache[stackedTag] || (reCache[stackedTag] = new RegExp('([\\s\\S]*?)(</' + stackedTag + '[^>]*>)', 'i'))
+            // 用于处理html里面写了script的情况
+            const rest = html.replace(reStackedTag, function (all, text, endTag) {
+                endTagLength = endTag.length
+                if (!isPlainTextElement(stackedTag) && stackedTag !== 'noscript') {
+                    text = text
+                        .replace(/<!\--([\s\S]*?)-->/g, '$1') // #7298
+                        .replace(/<!\[CDATA\[([\s\S]*?)]]>/g, '$1')
+                }
+                if (shouldIgnoreFirstNewline(stackedTag, text)) {
+                    text = text.slice(1)
+                }
+                if (options.chars) {
+                    options.chars(text)
+                }
+                return ''
+            })
+            index += html.length - rest.length
+            html = rest
+            parseEndTag(stackedTag, index - endTagLength, index)
         }
-        advance(1)
+        if (html === last) {
+            options.chars && options.chars(html)
+            break
+        }
     }
+    parseEndTag()
     function parseStartTag() {
         const start = html.match(startTagOpen)
         if (start) {
@@ -173,19 +201,42 @@ export function parseHTML(html, options) {
                 value: decodeAttr(value, shouldDecodeNewlines)
             }
         }
-        console.log(attrs,'attrsattrs');
+        console.log(attrs, 'attrsattrs');
         if (!unary) {
             stack.push({ tag: tagName, lowerCasedTag: tagName.toLowerCase(), attrs: attrs, start: match.start, end: match.end })
             lastTag = tagName  // 更新lastTag
-          }
-      
-          if (options.start) {
+        }
+
+        if (options.start) {
             options.start(tagName, attrs, unary, match.start, match.end)
-          }
+        }
     }
     // advance直接截取剩下的html
     function advance(n) {
         index += n
         html = html.substring(n)
+    }
+    function parseEndTag(tagName, start, end) {
+        let pos, lowerCasedTagName
+        if (start == null) start = index
+        if (end == null) end = index
+
+        if (tagName) {
+            lowerCasedTagName = tagName.toLowerCase()
+            for (pos = stack.length - 1; pos >= 0; pos--) {
+                // 这里遍历之前缓存解析的开始标签，注意这里是从第一个结束标签倒着遍历的
+                if (stack[pos].lowerCasedTag === lowerCasedTagName) {
+                    break
+                }
+            }
+        } else {
+            pos = 0
+        }
+
+        if (pos >= 0) {
+            for (let i = stack.length - 1; i >= pos; i--) {
+                
+            }
+        }
     }
 }
