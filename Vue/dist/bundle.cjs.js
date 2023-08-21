@@ -1827,8 +1827,9 @@
         var expectHTML = options.expectHTML;
         var isUnaryTag = options.isUnaryTag || (function () { return false; });
         var index = 0;
-        var lastTag;
+        var last, lastTag;
         while (html) {
+            last = html;
             // 针对一些特殊的元素标签做处理
             // lastTag 是一个变量，用于存储上一个解析的开始标签名。这个变量在解析过程中会被更新为当前解析的开始标签名
             // 它主要用来判断当前解析的光标是不是在一个标签的开始标签内部
@@ -1839,7 +1840,10 @@
                         // 这里判断开头是<--的注释的情况下，找到注释的结尾
                         var commentEnd = html.indexOf('-->');
                         if (commentEnd >= 0) {
-                            if (options.shouldKeepComment) ;
+                            if (options.shouldKeepComment) {
+                                // 是否保留注释
+                                options.comment(html.substring(4, commentEnd), index, index + commentEnd + 3);
+                            }
                             advance(commentEnd + 3);
                             continue
                         }
@@ -1891,7 +1895,6 @@
                         !comment.test(rest) &&
                         !conditionalComment.test(rest)
                     ) {
-                        // < in plain text, be forgiving and treat it as text
                         next = rest.indexOf('<', 1);
                         if (next < 0) { break }
                         textEnd += next;
@@ -1905,9 +1908,40 @@
                 if (text) {
                     advance(text.length);
                 }
+
+                if (options.chars && text) {
+                    options.chars(text, index - text.length, index);
+                }
+            } else {
+                var endTagLength = 0;
+                var stackedTag = lastTag.toLowerCase();
+                var reStackedTag = reCache[stackedTag] || (reCache[stackedTag] = new RegExp('([\\s\\S]*?)(</' + stackedTag + '[^>]*>)', 'i'));
+                // 用于处理html里面写了script的情况
+                var rest$1 = html.replace(reStackedTag, function (all, text, endTag) {
+                    endTagLength = endTag.length;
+                    if (!isPlainTextElement(stackedTag) && stackedTag !== 'noscript') {
+                        text = text
+                            .replace(/<!\--([\s\S]*?)-->/g, '$1') // #7298
+                            .replace(/<!\[CDATA\[([\s\S]*?)]]>/g, '$1');
+                    }
+                    if (shouldIgnoreFirstNewline(stackedTag, text)) {
+                        text = text.slice(1);
+                    }
+                    if (options.chars) {
+                        options.chars(text);
+                    }
+                    return ''
+                });
+                index += html.length - rest$1.length;
+                html = rest$1;
+                parseEndTag(stackedTag, index - endTagLength, index);
             }
-            advance(1);
+            if (html === last) {
+                options.chars && options.chars(html);
+                break
+            }
         }
+        parseEndTag();
         function parseStartTag() {
             var start = html.match(startTagOpen);
             if (start) {
@@ -1936,7 +1970,6 @@
         function handleStartTag(match) {
             var tagName = match.tagName;
             var unarySlash = match.unarySlash;
-            console.log(match, '>>>>>>>>');
             if (expectHTML) {
                 console.log('11111111');
             }
@@ -1956,26 +1989,134 @@
                     value: decodeAttr(value, shouldDecodeNewlines)
                 };
             }
-            console.log(attrs,'attrsattrs');
+            console.log(attrs,options, 'attrsattrs');
             if (!unary) {
                 stack.push({ tag: tagName, lowerCasedTag: tagName.toLowerCase(), attrs: attrs, start: match.start, end: match.end });
                 lastTag = tagName;  // 更新lastTag
-              }
-          
-              if (options.start) {
+            }
+
+            if (options.start) {
                 options.start(tagName, attrs, unary, match.start, match.end);
-              }
+            }
         }
         // advance直接截取剩下的html
         function advance(n) {
             index += n;
             html = html.substring(n);
         }
+        function parseEndTag(tagName, start, end) {
+            var pos, lowerCasedTagName;
+            if (start == null) { start = index; }
+            if (end == null) { end = index; }
+
+            if (tagName) {
+                lowerCasedTagName = tagName.toLowerCase();
+                for (pos = stack.length - 1; pos >= 0; pos--) {
+                    // 这里遍历之前缓存解析的开始标签，注意这里是从第一个结束标签倒着遍历的
+                    if (stack[pos].lowerCasedTag === lowerCasedTagName) {
+                        break
+                    }
+                }
+            } else {
+                pos = 0;
+            }
+
+            if (pos >= 0) {
+                for (var i = stack.length - 1; i >= pos; i--) {
+                    if (options.end) {
+                        options.end(stack[i].tag, start, end);
+                    }
+                }
+                stack.length = pos;  // 确保堆栈数组只包含在当前处理位置之前的标签元素
+                lastTag = pos && stack[pos - 1].tag; // pos为零，不会走到后面的逻辑
+                // 如果pos不为0则表示上一个标签存在取出stack数组中索引为pos-1的元素并获取其标签名（tag属性）将其赋值给lastTag变量。如果pos为0，表示没有上一个标签，则将lastTag设为''（空字符串）。
+            } else if (lowerCasedTagName === 'br') {
+                // 这里单独判断br和p的原因是，这俩标签都可以写成</br>、</p>，都能换行，有些浏览器会把这俩解析，
+                //  </br> 标签被正常解析为 <br> 标签，而</p>标签被正常解析为 <p></p> ，为了一致性这里单独判断
+                if (options.start) {
+                    options.start(tagName, [], true, start, end);
+                }
+            } else if (lowerCasedTagName === 'p') {
+                if (options.start) {
+                    options.start(tagName, [], false, start, end);
+                }
+                if (options.end) {
+                    options.end(tagName, start, end);
+                }
+            }
+        }
     }
 
+    function pluckModuleFunction(modules, key) {
+        return modules
+            ? modules.map(function (m) { return m[key]; }).filter(function (_) { return _; })
+            : []
+    }
+    function getAndRemoveAttr(
+        el,
+        name,
+        removeFromMap
+    ) {
+        var val;
+        if ((val = el.attrsMap[name]) != null) {
+            var list = el.attrsList;
+            for (var i = 0, l = list.length; i < l; i++) {
+                if (list[i].name === name) {
+                    list.splice(i, 1);
+                    break
+                }
+            }
+        }
+        if (removeFromMap) {
+            delete el.attrsMap[name];
+        }
+        return val
+    }
+
+    var forAliasRE = /([\s\S]*?)\s+(?:in|of)\s+([\s\S]*)/;
+    var forIteratorRE = /,([^,\}\]]*)(?:,([^,\}\]]*))?$/;
+    var stripParensRE = /^\(|\)$/g;
+    var preTransforms;
+    var platformIsPreTag;
+    function createASTElement(
+        tag,
+        attrs,
+        parent
+    ) {
+        return {
+            type: 1,
+            tag: tag,
+            attrsList: attrs,
+            attrsMap: makeAttrsMap(attrs),
+            rawAttrsMap: {},
+            parent: parent,
+            children: []
+        }
+    }
     function parse(template, options) {
         // warn = options.warn || baseWarn
+        platformIsPreTag = options.isPreTag || (function (tag) { return tag === 'pre'; });
         var root;
+        var currentParent;
+        var inVPre = false;
+        var inPre = false;
+        preTransforms = pluckModuleFunction(options.modules, 'preTransformNode');
+        function closeElement() {
+            // 确保元素节点的末尾不会包含空格字符所对应的文本节点
+            trimEndingWhitespace(element);
+        }
+        function trimEndingWhitespace(el) {
+            if (!inPre) {
+                var lastNode;
+                while (
+                    (lastNode = el.children[el.children.length - 1]) &&
+                    lastNode.type === 3 &&
+                    lastNode.text === ' '
+                ) {
+                    el.children.pop();
+                }
+            }
+        }
         parseHTML(template, {
             expectHTML: options.expectHTML,
             isUnaryTag: options.isUnaryTag,
@@ -1984,16 +2125,132 @@
             shouldDecodeNewlinesForHref: options.shouldDecodeNewlinesForHref,
             shouldKeepComment: options.comments,
             outputSourceRange: options.outputSourceRange,
+            start: function start(tag, attrs, unary, start$1, end) {
+                // parseHTML用来分割解析html字符串，整理为一个标准的层级结构，然后外面会传递过来几个方法，在每个html解析阶段调用
+                var element = createASTElement(tag, attrs, currentParent);
+                if (!root) {
+                    root = element;
+                }
+                console.log(element, '>>>>>>>>>>');
+                // 判断是否是该忽略的标签和是否在服务端环境
+                if (isForbiddenTag(element) && !isServerRendering()) {
+                    element.forbidden = true;
+                }
+                // 在编译阶段之前，先对模板的 AST 进行一些预转换操作  具体根据不同的模块进行具体的操作，一般来说这里
+                // preTransforms数组中函数的值来自于createcomplier函数的参数，module的模块有解析class model style
+                for (var i = 0; i < preTransforms.length; i++) {
+                    element = preTransforms[i](element, options) || element;
+                }
+                // v-pre的处理
+                if (!inVPre) {
+                    processPre(element);
+                    if (element.pre) {
+                        inVPre = true;
+                    }
+                }
+                // 函数判断当前元素的标签名是否是 <pre>
+                if (platformIsPreTag(element.tag)) {
+                    inPre = true;
+                }
+                if (inVPre) {
+                    // 将元素的原始属性列表转换为属性对象数组，并对每个属性进行处理和转换。
+                    processRawAttrs(element);
+                } else if (!element.processed) {
+                    // 这里就能看明白v-for 和 v-if的优先级
+                    processFor(element);
+                    // processIf(element)
+                    // processOnce(element)
+                    console.log(element, 'forforforforfor');
+                }
+
+                if (!root) {
+                    root = element;
+                }
+
+                if (!unary) {
+                    currentParent = element;
+                } else {
+                    closeElement();
+                }
+            },
         });
         return root
+    }
+    function makeAttrsMap(attrs) {
+        var map = {};
+        for (var i = 0, l = attrs.length; i < l; i++) {
+            map[attrs[i].name] = attrs[i].value;
+        }
+        return map
+    }
+    function processPre(el) {
+        if (getAndRemoveAttr(el, 'v-pre') != null) {
+            el.pre = true;
+        }
+    }
+    function processRawAttrs(el) {
+        var list = el.attrsList;
+        var len = list.length;
+        if (len) {
+            var attrs = el.attrs = new Array(len);
+            for (var i = 0; i < len; i++) {
+                attrs[i] = {
+                    name: list[i].name,
+                    value: JSON.stringify(list[i].value)
+                };
+                if (list[i].start != null) {
+                    attrs[i].start = list[i].start;
+                    attrs[i].end = list[i].end;
+                }
+            }
+        } else if (!el.pre) {
+            el.plain = true;
+        }
+    }
+    function parseFor(exp) {
+        // 通过正则表达式匹配到v-for的格式   v-for="a in b"   v-for="(index,i) of b"
+        var inMatch = exp.match(forAliasRE);
+        if (!inMatch) { return }
+        var res = {};
+        res.for = inMatch[2].trim();
+        var alias = inMatch[1].trim().replace(stripParensRE, '');  //stripParensRE正则用于匹配左括号或右括号，并去除
+        var iteratorMatch = alias.match(forIteratorRE);  // 用于解构迭代源的别名以及其它可能存在的取值方式
+        if (iteratorMatch) {
+            res.alias = alias.replace(forIteratorRE, '').trim();
+            res.iterator1 = iteratorMatch[1].trim();
+            if (iteratorMatch[2]) {
+                res.iterator2 = iteratorMatch[2].trim();
+            }
+        } else {
+            res.alias = alias;
+        }
+        return res
+    }
+    function processFor(el) {
+        var exp;
+        if ((exp = getAndRemoveAttr(el, 'v-for'))) {
+            var res = parseFor(exp);
+            if (res) {
+                extend(el, res);
+            }
+        }
+    }
+    function isForbiddenTag(el) {
+        return (
+            el.tag === 'style' ||
+            (el.tag === 'script' && (
+                !el.attrsMap.type ||
+                el.attrsMap.type === 'text/javascript'
+            ))
+        )
     }
 
     var createCompiler = createCompilerCreator(function baseCompile(
         template,
         options
     ) {
-        console.log(template,options,'----------ddd-------');
         var ast = parse(template.trim(), options);
+        console.log( ast,'----------ddd-------');
         if (options.optimize !== false) {
             optimize(ast, options);
         }

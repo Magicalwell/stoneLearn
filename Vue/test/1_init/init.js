@@ -4,7 +4,8 @@ var demo = new Vue({
     return {
       textRender: 'false',
       test: 123,
-      ttthlll: 'qqqqq'
+      ttthlll: 'qqqqq',
+      list: [{ id: 1, name: '1111' }]
     }
   },
   created() {
@@ -18,6 +19,13 @@ var demo = new Vue({
   //   >
   // `
   template: `
-  <div v-model="test" :mode="textRender">123</div>
+  <div v-model="test" :mode="textRender">
+    <div v-for="item in list"></div>
+  <input
+  type="text"
+  v-bind:value="test"
+  v-on:input="$emit('input', $event.target.value)"
+>
+  </div>
 `
 })

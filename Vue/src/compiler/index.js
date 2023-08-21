@@ -5,8 +5,8 @@ export const createCompiler = createCompilerCreator(function baseCompile(
     template,
     options
 ) {
-    console.log(template,options,'----------ddd-------');
     const ast = parse(template.trim(), options)
+    console.log( ast,'----------ddd-------');
     if (options.optimize !== false) {
         optimize(ast, options)
     }

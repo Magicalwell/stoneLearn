@@ -54,6 +54,7 @@ export function parseHTML(html, options) {
                     if (commentEnd >= 0) {
                         if (options.shouldKeepComment) {
                             // 是否保留注释
+                            options.comment(html.substring(4, commentEnd), index, index + commentEnd + 3)
                         }
                         advance(commentEnd + 3)
                         continue
@@ -181,7 +182,6 @@ export function parseHTML(html, options) {
     function handleStartTag(match) {
         const tagName = match.tagName
         const unarySlash = match.unarySlash
-        console.log(match, '>>>>>>>>');
         if (expectHTML) {
             console.log('11111111');
         }
@@ -201,7 +201,7 @@ export function parseHTML(html, options) {
                 value: decodeAttr(value, shouldDecodeNewlines)
             }
         }
-        console.log(attrs, 'attrsattrs');
+        console.log(attrs,options, 'attrsattrs');
         if (!unary) {
             stack.push({ tag: tagName, lowerCasedTag: tagName.toLowerCase(), attrs: attrs, start: match.start, end: match.end })
             lastTag = tagName  // 更新lastTag
@@ -235,7 +235,25 @@ export function parseHTML(html, options) {
 
         if (pos >= 0) {
             for (let i = stack.length - 1; i >= pos; i--) {
-                
+                if (options.end) {
+                    options.end(stack[i].tag, start, end)
+                }
+            }
+            stack.length = pos  // 确保堆栈数组只包含在当前处理位置之前的标签元素
+            lastTag = pos && stack[pos - 1].tag // pos为零，不会走到后面的逻辑
+            // 如果pos不为0则表示上一个标签存在取出stack数组中索引为pos-1的元素并获取其标签名（tag属性）将其赋值给lastTag变量。如果pos为0，表示没有上一个标签，则将lastTag设为''（空字符串）。
+        } else if (lowerCasedTagName === 'br') {
+            // 这里单独判断br和p的原因是，这俩标签都可以写成</br>、</p>，都能换行，有些浏览器会把这俩解析，
+            //  </br> 标签被正常解析为 <br> 标签，而</p>标签被正常解析为 <p></p> ，为了一致性这里单独判断
+            if (options.start) {
+                options.start(tagName, [], true, start, end)
+            }
+        } else if (lowerCasedTagName === 'p') {
+            if (options.start) {
+                options.start(tagName, [], false, start, end)
+            }
+            if (options.end) {
+                options.end(tagName, start, end)
             }
         }
     }
