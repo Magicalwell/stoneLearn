@@ -6,6 +6,7 @@ const path = require('path')
 const replace = require('@rollup/plugin-replace')
 // replace插件是用来替换一些全局变量
 const aliases = require('./alias')
+const featureFlags = require('./feature-flags')
 const resolve = p => {
     const base = p.split('/')[0]
     if (aliases[base]) {
@@ -44,6 +45,21 @@ function genConfig(name) {
             }),
             buble()
         ]
+    }
+    const vars = {
+        // __WEEX__: !!opts.weex,
+        // __WEEX_VERSION__: weexVersion,
+        // __VERSION__: version
+    }
+    // feature flags
+    Object.keys(featureFlags).forEach(key => {
+        vars[`process.env.${key}`] = featureFlags[key]
+    })
+    console.log(vars,'varsvars');
+    config.plugins.push(replace(vars))
+
+    if (opts.transpile !== false) {
+        config.plugins.push(buble())
     }
     return config
 }

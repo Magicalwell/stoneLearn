@@ -199,7 +199,7 @@
 
     var VNode$1 = function VNode () {};
     var createEmptyVNode$1 = function (text) {
-        if ( text === void 0 ) text = '';
+        if ( text === void 0 ) { text = ''; }
 
         var node = new VNode$1();
         node.text = text;
@@ -225,8 +225,10 @@
     methodsToPatch.forEach(function (method) {
         var original = arrayProto[method]; //获取到原生的方法
         def(arrayMethods, method, function mutator() {
+            var arguments$1 = arguments;
+
             var args = [], len = arguments.length;
-            while ( len-- ) args[ len ] = arguments[ len ];
+            while ( len-- ) { args[ len ] = arguments$1[ len ]; }
 
             var result = original.apply(this, args); //先保有原生的方法逻辑，并调用一遍，在最后响应式逻辑执行完后返回。等同于切片重写
             var ob = this.__ob__;
@@ -2072,6 +2074,18 @@
         }
         return val
     }
+    function getRawBindingAttr(el, name) {
+        return el.rawAttrsMap[':' + name] ||
+            el.rawAttrsMap['v-bind:' + name] ||
+            el.rawAttrsMap[name]
+    }
+    function addAttr(el, name, value, range, dynamic) {
+        var attrs = dynamic
+            ? (el.dynamicAttrs || (el.dynamicAttrs = []))
+            : (el.attrs || (el.attrs = []));
+        attrs.push(rangeSetItem({ name: name, value: value, dynamic: dynamic }, range));
+        el.plain = false;
+    }
 
     var forAliasRE = /([\s\S]*?)\s+(?:in|of)\s+([\s\S]*)/;
     var forIteratorRE = /,([^,\}\]]*)(?:,([^,\}\]]*))?$/;
@@ -2096,6 +2110,7 @@
     function parse(template, options) {
         // warn = options.warn || baseWarn
         platformIsPreTag = options.isPreTag || (function (tag) { return tag === 'pre'; });
+        var stack = [];
         var root;
         var currentParent;
         var inVPre = false;
@@ -2104,6 +2119,22 @@
         function closeElement() {
             // 确保元素节点的末尾不会包含空格字符所对应的文本节点
             trimEndingWhitespace(element);
+            // 判断是否不在v-pre中，且是否没有被处理
+            if (!inVPre && !element.processed) {
+                // 直接进行AST的解析处理
+                element = processElement(element);
+            }
+            // 如果当前栈为空并且当前元素节点不是根节点  用来判断当前是否存在未闭合的非根节点
+            // 当遇到一个标签的开始标签，就会入栈，该元素节点闭合时，会弹出栈顶的元素节点
+            if (!stack.length && element !== root) {
+                // 这里就是允许根节点同级的节点 要以if或else elseif的方式
+                if (root.if && (element.elseif || element.else)) {
+                    addIfCondition(root, {
+                        exp: element.elseif,
+                        block: element
+                    });
+                }
+            }
         }
         function trimEndingWhitespace(el) {
             if (!inPre) {
@@ -2158,9 +2189,8 @@
                 } else if (!element.processed) {
                     // 这里就能看明白v-for 和 v-if的优先级
                     processFor(element);
-                    // processIf(element)
-                    // processOnce(element)
-                    console.log(element, 'forforforforfor');
+                    processIf(element);
+                    processOnce(element);
                 }
 
                 if (!root) {
@@ -2169,6 +2199,7 @@
 
                 if (!unary) {
                     currentParent = element;
+                    stack.push(element);
                 } else {
                     closeElement();
                 }
@@ -2207,6 +2238,12 @@
             el.plain = true;
         }
     }
+    function processOnce(el) {
+        var once = getAndRemoveAttr(el, 'v-once');
+        if (once != null) {
+            el.once = true;
+        }
+    }
     function parseFor(exp) {
         // 通过正则表达式匹配到v-for的格式   v-for="a in b"   v-for="(index,i) of b"
         var inMatch = exp.match(forAliasRE);
@@ -2235,6 +2272,78 @@
             }
         }
     }
+    // parseHtml的核心就是processElement
+    function processElement(element, options) {
+        //依次处理key ref slot component attrs
+        processKey(element);
+        // 标记节点是不是一个普通节点，即不包含任何动态绑定、键值、作用域插槽和属性列表，这样做的目的是
+        // 在编译阶段进行优化，减少对这些节点的处理和更新操作，提高渲染性能
+        element.plain = (
+            !element.key &&
+            !element.scopedSlots &&
+            !element.attrsList.length
+        );
+        // 处理ref  把自己的引用挂载element上面  同时检查是否在v-for内，以保证唯一且正确的引用
+        processRef(element);
+        // 这里处理三种插槽 注意这三种为slot-scope  slot   v-slot    <slot>标签需要在子元素中处理
+        processSlotContent(element);
+        processSlotOutlet(element);
+        processComponent(element);
+
+    }
+    function addIfCondition(el, condition) {
+        if (!el.ifConditions) {
+            el.ifConditions = [];
+        }
+        el.ifConditions.push(condition);
+    }
+    function processIf(el) {
+        var exp = getAndRemoveAttr(el, 'v-if');
+        // 获取元素节点上的 v-if 属性的值
+        if (exp) {
+            // 表示该元素节点是条件渲染的起始节点
+            el.if = exp;
+            // 将条件块的信息添加到元素节点的条件列表中，其中包括条件表达式和当前元素节点本身。
+            addIfCondition(el, {
+                exp: exp,
+                block: el
+            });
+        } else {
+            if (getAndRemoveAttr(el, 'v-else') != null) {
+                el.else = true;
+            }
+            var elseif = getAndRemoveAttr(el, 'v-else-if');
+            if (elseif) {
+                el.elseif = elseif;
+            }
+        }
+    }
+    function processKey(el) {
+        var exp = getBindingAttr(el, 'key');
+        if (exp) {
+            el.key = exp;
+        }
+    }
+    function processRef(el) {
+        // 提取并删除ref 挂载到el上面，同时判断是否在v-for内部
+        var ref = getBindingAttr(el, 'ref');
+        if (ref) {
+            el.ref = ref;
+            // 这里为了ref在v-for内部时能正确处理，以确保引用的唯一性和正确性
+            el.refInFor = checkInFor(el);
+        }
+    }
+    function checkInFor(el) {
+        // 向上遍历，检查el中有没有parent，有没有for标记，这个for标记就是在有v-for指令时会存在的，一直向上找直到没有parent
+        var parent = el;
+        while (parent) {
+            if (parent.for !== undefined) {
+                return true
+            }
+            parent = parent.parent;
+        }
+        return false
+    }
     function isForbiddenTag(el) {
         return (
             el.tag === 'style' ||
@@ -2243,6 +2352,32 @@
                 el.attrsMap.type === 'text/javascript'
             ))
         )
+    }
+    function processSlotContent(el) {
+        var slotScope;
+        if (el.tag === 'template') {
+            // 先处理作用域插槽的两种写法，只写scope的比较少见  获取到slot-scope的值并绑定在slotScope中
+            slotScope = getAndRemoveAttr(el, 'scope');
+            el.slotScope = slotScope || getAndRemoveAttr(el, 'slot-scope');
+        } else if ((slotScope = getAndRemoveAttr(el, 'slot-scope'))) {
+            // el的标签不是template且存在slot - scope属性，则将其赋值给slotScope变量
+            el.slotScope = slotScope;
+        }
+        // 处理具名插槽的名称   slot="xxx"
+        var slotTarget = getBindingAttr(el, 'slot');
+        if (slotTarget) {
+            // 这里默认不给任何值时对应的是default
+            el.slotTarget = slotTarget === '""' ? '"default"' : slotTarget;
+            // 这里判断slot的值是不是动态的 如果解析的emelent里面属性字典里面有:slot或v-bind:slot则做标记
+            el.slotTargetDynamic = !!(el.attrsMap[':slot'] || el.attrsMap['v-bind:slot']);
+            // 如果不是template且没有slotscope  则直接给el的属性添加{name: 'slot', value: slotTarget}
+            if (el.tag !== 'template' && !el.slotScope) {
+                addAttr(el, 'slot', slotTarget, getRawBindingAttr(el, 'slot'));
+            }
+        }
+        // 处理v-slot
+        console.log(process.env,'............');
+
     }
 
     var createCompiler = createCompilerCreator(function baseCompile(
