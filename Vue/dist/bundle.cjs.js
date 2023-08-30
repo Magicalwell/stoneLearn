@@ -2079,6 +2079,19 @@
             el.rawAttrsMap['v-bind:' + name] ||
             el.rawAttrsMap[name]
     }
+    function getBindingAttr(el, name, getStatic) {
+        var dynamicValue =
+            getAndRemoveAttr(el, ':' + name) ||
+            getAndRemoveAttr(el, 'v-bind:' + name);
+        if (dynamicValue != null) {
+            return parseFilters(dynamicValue)
+        } else if (getStatic !== false) {
+            var staticValue = getAndRemoveAttr(el, name);
+            if (staticValue != null) {
+                return JSON.stringify(staticValue)
+            }
+        }
+    }
     function addAttr(el, name, value, range, dynamic) {
         var attrs = dynamic
             ? (el.dynamicAttrs || (el.dynamicAttrs = []))
@@ -2086,12 +2099,29 @@
         attrs.push(rangeSetItem({ name: name, value: value, dynamic: dynamic }, range));
         el.plain = false;
     }
+    function getAndRemoveAttrByRegex(el, name) {
+        var list = el.attrsList;
+        for (var i = 0, l = list.length; i < l; i++) {
+            var attr = list[i];
+            if (name.test(attr.name)) {
+                list.splice(i, 1);
+                return attr
+            }
+        }
+    }
 
-    var forAliasRE = /([\s\S]*?)\s+(?:in|of)\s+([\s\S]*)/;
-    var forIteratorRE = /,([^,\}\]]*)(?:,([^,\}\]]*))?$/;
+    var slotRE = /^v-slot(:|$)|^#/;
     var stripParensRE = /^\(|\)$/g;
+    var dynamicArgRE = /^\[.*\]$/;
+    var modifierRE = /\.[^.\]]+(?=[^\]]*$)/g;
+    var transforms;
     var preTransforms;
     var platformIsPreTag;
+    var dirRE = /^v-|^@|^:|^#/;
+    var forAliasRE = /([\s\S]*?)\s+(?:in|of)\s+([\s\S]*)/;
+    var forIteratorRE = /,([^,\}\]]*)(?:,([^,\}\]]*))?$/;
+    var emptySlotScopeToken = "_empty_";
+
     function createASTElement(
         tag,
         attrs,
@@ -2115,14 +2145,15 @@
         var currentParent;
         var inVPre = false;
         var inPre = false;
+        transforms = pluckModuleFunction(options.modules, 'transformNode');
         preTransforms = pluckModuleFunction(options.modules, 'preTransformNode');
-        function closeElement() {
+        function closeElement(element) {
             // 确保元素节点的末尾不会包含空格字符所对应的文本节点
             trimEndingWhitespace(element);
             // 判断是否不在v-pre中，且是否没有被处理
             if (!inVPre && !element.processed) {
                 // 直接进行AST的解析处理
-                element = processElement(element);
+                element = processElement(element, options);
             }
             // 如果当前栈为空并且当前元素节点不是根节点  用来判断当前是否存在未闭合的非根节点
             // 当遇到一个标签的开始标签，就会入栈，该元素节点闭合时，会弹出栈顶的元素节点
@@ -2133,6 +2164,19 @@
                         exp: element.elseif,
                         block: element
                     });
+                }
+            }
+            //处理当前元素和父元素的关系 同时处理在插槽里面的情况，将具名插槽元素存储在父元素的scopedSlots属性中
+            if (currentParent && !element.forbidden) {
+                if (element.elseif || element.else) {
+                    processIfConditions(element, currentParent);
+                } else {
+                    if (element.slotScope) {
+                        var name = element.slotTarget || '"default"'
+                            ; (currentParent.scopedSlots || (currentParent.scopedSlots = {}))[name] = element;
+                    }
+                    currentParent.children.push(element);
+                    element.parent = currentParent;
                 }
             }
         }
@@ -2162,7 +2206,6 @@
                 if (!root) {
                     root = element;
                 }
-                console.log(element, '>>>>>>>>>>');
                 // 判断是否是该忽略的标签和是否在服务端环境
                 if (isForbiddenTag(element) && !isServerRendering()) {
                     element.forbidden = true;
@@ -2201,8 +2244,15 @@
                     currentParent = element;
                     stack.push(element);
                 } else {
-                    closeElement();
+                    closeElement(element);
                 }
+            },
+            end: function end(tag, start, end$1) {
+                var element = stack[stack.length - 1];
+                // pop stack
+                stack.length -= 1;
+                currentParent = stack[stack.length - 1];
+                closeElement(element);
             },
         });
         return root
@@ -2288,7 +2338,14 @@
         // 这里处理三种插槽 注意这三种为slot-scope  slot   v-slot    <slot>标签需要在子元素中处理
         processSlotContent(element);
         processSlotOutlet(element);
+        // 处理 :is动态组件的情况
         processComponent(element);
+        // 下面要进行属性的处理了，先进行预转换
+        for (var i = 0; i < transforms.length; i++) {
+            element = transforms[i](element, options) || element;
+        }
+        processAttrs(element);
+        return element
 
     }
     function addIfCondition(el, condition) {
@@ -2353,6 +2410,20 @@
             ))
         )
     }
+
+    function getSlotName(binding) {
+        // 把v-slot: 或#替换为空，这样就只剩下name了，接着判断是否有name
+        var name = binding.name.replace(slotRE, '');
+        if (!name) {
+            if (binding.name[0] !== '#') {
+                name = 'default';
+            }
+        }
+        // 判断是否是动态值
+        return dynamicArgRE.test(name)
+            ? { name: name.slice(1, -1), dynamic: true }
+            : { name: ("\"" + name + "\""), dynamic: false }
+    }
     function processSlotContent(el) {
         var slotScope;
         if (el.tag === 'template') {
@@ -2376,8 +2447,96 @@
             }
         }
         // 处理v-slot
-        console.log(process.env,'............');
+        {
+            if (el.tag === 'template') {
+                //用正则去匹配v-slot:header  #footer  v-slot这三种写法
+                var slotBinding = getAndRemoveAttrByRegex(el, slotRE);
+                if (slotBinding) {
+                    var ref = getSlotName(slotBinding);
+                    var name = ref.name;
+                    var dynamic = ref.dynamic;
+                    el.slotTarget = name;
+                    el.slotTargetDynamic = dynamic;
+                    el.slotScope = slotBinding.value || emptySlotScopeToken;
+                }
+            } else {
+                // v-slot只能用在template或者组件上 这里处理在组件上的情况
+                var slotBinding$1 = getAndRemoveAttrByRegex(el, slotRE);
+                if (slotBinding$1) {
+                    // 创建一个slotContainer元素，用于存储插槽的相关信息，保存在el上面
+                    var slots = el.scopedSlots || (el.scopedSlots = {});
+                    var ref$1 = getSlotName(slotBinding$1);
+                    var name$1 = ref$1.name;
+                    var dynamic$1 = ref$1.dynamic;
+                    // 创建一个名为slotContainer的AST元素，类型为template，并将其存储在slots对象中的对应名称的属性上
+                    var slotContainer = slots[name$1] = createASTElement('template', [], el);
+                    slotContainer.slotTarget = name$1;
+                    slotContainer.slotTargetDynamic = dynamic$1;
+                    slotContainer.children = el.children.filter(function (c) {
+                        if (!c.slotScope) {
+                            // 找出那些没有slotScope属性的孩子节点，然后将它们的父节点指向slotContainer，并返回true，以便将它们作为slotContainer的孩子节点。
+                            c.parent = slotContainer;
+                            return true
+                        }
+                    });
+                    slotContainer.slotScope = slotBinding$1.value || emptySlotScopeToken;
+                    el.children = []; // 清空el.children数组，因为插槽内容将会从scopedSlots中取得。
+                    el.plain = false; // 表示el不再是一个简单的静态节点，需要生成相应的渲染数据
+                }
+            }
+        }
 
+    }
+    function processSlotOutlet(el) {
+        if (el.tag === 'slot') {
+            el.slotName = getBindingAttr(el, 'name');
+        }
+    }
+    function processComponent(el) {
+        var binding;
+        if ((binding = getBindingAttr(el, 'is'))) {
+            el.component = binding;
+        }
+        if (getAndRemoveAttr(el, 'inline-template') != null) {
+            el.inlineTemplate = true;
+        }
+    }
+    // 这里开始处理html解析后标签上的属性
+    function processAttrs(el) {
+        var list = el.attrsList;
+        var i, l, name;
+        for (i = 0, l = list.length; i < l; i++) {
+            name = list[i].name;
+            list[i].value;
+            // dirRE来判断简写指令还是非简写，简写的情况下：
+            // ^v-：以v-开头的指令。
+            // 示例：v-if、v-for、v-bind等。
+            // ^@：以@符号开头的指令。
+            // 示例：@click、@input、@keyup.enter等。
+            // ^:：以:符号开头的指令。
+            // 示例：:value、:class、:style等。
+            // ^\.：以.符号开头的指令。
+            // 示例：.sync、.once、.native等。
+            // ^#：以#符号开头的指令。
+            // 示例：#ref、#slot、#key等。
+
+            // 判断有这些指令，则代表有响应式数据
+            if (dirRE.test(name)) {
+                el.hasBindings = true; //标记有绑定
+                parseModifiers(name.replace(dirRE, ''));  // 解析指令并把修饰符保留在modifiers中
+            }
+            console.log(list[i].name, el, '------list[i].name-----');
+        }
+    }
+    function parseModifiers(name) {
+        // /\.[^.\]]+(?=[^\]]*$)/g  匹配.字符+除.和]外的多个字符+正向肯定预查，用于限制修饰符不能包含]字符；这样确保匹配到的格式是正确的
+        // 例如@click.stop
+        var match = name.match(modifierRE);
+        if (match) {
+            var ret = {};
+            match.forEach(function (m) { ret[m.slice(1)] = true; });
+            return ret
+        }
     }
 
     var createCompiler = createCompilerCreator(function baseCompile(

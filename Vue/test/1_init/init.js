@@ -20,12 +20,12 @@ var demo = new Vue({
   // `
   template: `
   <div v-model="test" :mode="textRender">
-    <div v-for="item in list"></div>
-  <input
-  type="text"
-  v-bind:value="test"
-  v-on:input="$emit('input', $event.target.value)"
->
+    <div v-for="item in list">{{item.name}}</div>
+    <input
+      type="text"
+      v-bind:value="test"
+      v-on:input="$emit('input', $event.target.value)"
+    >
   </div>
 `
 })

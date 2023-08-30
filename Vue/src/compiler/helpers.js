@@ -48,3 +48,13 @@ export function addAttr(el, name, value, range, dynamic) {
     attrs.push(rangeSetItem({ name, value, dynamic }, range))
     el.plain = false
 }
+export function getAndRemoveAttrByRegex(el, name) {
+    const list = el.attrsList
+    for (let i = 0, l = list.length; i < l; i++) {
+        const attr = list[i]
+        if (name.test(attr.name)) {
+            list.splice(i, 1)
+            return attr
+        }
+    }
+}
